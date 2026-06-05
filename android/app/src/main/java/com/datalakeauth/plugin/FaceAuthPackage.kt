@@ -37,7 +37,10 @@ class FaceAuthPackage : ReactPackage {
     }
 
     override fun createNativeModules(reactContext: ReactApplicationContext): List<NativeModule> {
-        return listOf(FaceAuthModule(reactContext))
+        return listOf(
+            FaceAuthModule(reactContext),
+            DeviceTimeModule(reactContext)
+        )
     }
 
     override fun createViewManagers(reactContext: ReactApplicationContext): List<ViewManager<*, *>> {

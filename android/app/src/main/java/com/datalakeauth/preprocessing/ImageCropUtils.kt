@@ -173,8 +173,49 @@ object ImageCropUtils {
             confidence = validated.confidence
         )
 
+        // clean.py uses PADDING = 0.2 (20% on all sides), which equates to a 1.4x scale box.
+        // MobileFaceNet was trained on this 1.4x crop, so we MUST use 1.4f here, not 1.0f!
         val (left, top, right, bottom) = silentfaceScaledBox(
-            bitmap.width, bitmap.height, squareBox, 1.0f
+            bitmap.width, bitmap.height, squareBox, 1.4f
+        )
+
+        val safeLeft = max(0, left)
+        val safeTop = max(0, top)
+        val safeRight = min(bitmap.width - 1, right)
+        val safeBottom = min(bitmap.height - 1, bottom)
+        val cropW = safeRight - safeLeft + 1
+        val cropH = safeBottom - safeTop + 1
+
+        if (cropW <= 0 || cropH <= 0) {
+            return Bitmap.createScaledBitmap(bitmap, outputWidth, outputHeight, true)
+        }
+
+        val cropped = Bitmap.createBitmap(bitmap, safeLeft, safeTop, cropW, cropH)
+        return Bitmap.createScaledBitmap(cropped, outputWidth, outputHeight, true)
+    }
+
+    /**
+     * Gets a wider crop of the face for UI display purposes (includes hair/neck).
+     */
+    fun getDisplayFaceCrop(
+        bitmap: Bitmap,
+        box: FaceBox,
+        outputWidth: Int = 400,
+        outputHeight: Int = 400
+    ): Bitmap {
+        val validated = validateBBox(box, bitmap.width, bitmap.height)
+        val side = max(validated.width, validated.height)
+        val squareBox = FaceBox(
+            x = validated.x + validated.width / 2f - side / 2f,
+            y = validated.y + validated.height / 2f - side / 2f,
+            width = side,
+            height = side,
+            confidence = validated.confidence
+        )
+
+        // Use 1.8f scale for a much wider crop suitable for profile pictures
+        val (left, top, right, bottom) = silentfaceScaledBox(
+            bitmap.width, bitmap.height, squareBox, 1.8f
         )
 
         val safeLeft = max(0, left)

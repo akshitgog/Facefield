@@ -83,7 +83,7 @@ export const LoginScreen: React.FC<Props> = ({ navigation }) => {
               style={styles.logoImage} 
               resizeMode="contain"
             />
-            <Text style={styles.appName}>Biometr</Text>
+            <Text style={styles.appName}>Facefield</Text>
             <Text style={styles.tagline}>Offline Face Auth & Attendance</Text>
           </View>
 

@@ -1,181 +1,184 @@
-import React, { useMemo, useState } from 'react';
-import {
-  View,
-  Text,
-  StyleSheet,
-  FlatList,
-  TextInput,
-  TouchableOpacity,
-} from 'react-native';
+import React, { useMemo } from 'react';
+import { View, Text, StyleSheet, ScrollView } from 'react-native';
 import { BottomTabScreenProps } from '@react-navigation/bottom-tabs';
-import { SafeAreaWrapper, StatusBadge } from '../../components';
+import { SafeAreaWrapper } from '../../components';
 import { colors, spacing, typography, radius, fs } from '../../theme';
-import { useAttendanceStore, AttendanceRecord } from '../../store';
+import { useAttendanceStore } from '../../store';
 import { AppTabParamList } from '../../navigation/AppTabs';
+import { Calendar } from 'react-native-calendars';
 
 type Props = BottomTabScreenProps<AppTabParamList, 'History'>;
 
 export const HistoryScreen: React.FC<Props> = () => {
   const allRecords = useAttendanceStore((state) => state.records);
-  const [search, setSearch] = useState('');
+  const detailedRecords = useMemo(() => allRecords.filter(r => !r.isPurged), [allRecords]);
 
-  const records = useMemo(() => {
-    const sorted = [...allRecords].sort(
-      (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()
-    );
-    if (!search.trim()) return sorted;
-    return sorted.filter((r) =>
-      r.date.includes(search) ||
-      r.status.toLowerCase().includes(search.toLowerCase())
-    );
-  }, [allRecords, search]);
-
-  const renderItem = ({ item }: { item: AttendanceRecord }) => {
-    const d = new Date(item.date);
-    const dateLabel = d.toLocaleDateString('en-IN', {
-      weekday: 'short', day: 'numeric', month: 'short',
+  const markedDates = useMemo(() => {
+    const dates: any = {};
+    const today = new Date();
+    
+    const recordMap = new Map();
+    allRecords.forEach(r => {
+      recordMap.set(r.date, r);
     });
-    return (
-      <View style={styles.row}>
-        <View style={styles.dateBlock}>
-          <Text style={styles.dayNum}>{d.getDate()}</Text>
-          <Text style={styles.month}>
-            {d.toLocaleString('en-IN', { month: 'short' })}
-          </Text>
-        </View>
-        <View style={styles.details}>
-          <Text style={styles.dateLabel}>{dateLabel}</Text>
-          <Text style={styles.times}>
-            In: {item.entryTime ?? '—'} · Out: {item.exitTime ?? '—'}
-          </Text>
-        </View>
-        <StatusBadge status={item.status} />
-      </View>
-    );
-  };
 
-  const ListEmpty = () => (
-    <View style={styles.empty}>
-      <Text style={typography.h3}>No records found</Text>
-      <Text style={typography.small}>Mark attendance to see history here.</Text>
-    </View>
-  );
+    for (let i = 0; i < 30; i++) {
+      const d = new Date();
+      d.setDate(today.getDate() - i);
+      const dateStr = d.toISOString().split('T')[0];
+      
+      if (recordMap.has(dateStr)) {
+        const record = recordMap.get(dateStr);
+        dates[dateStr] = {
+          selected: true,
+          selectedColor: record.status === 'late' ? colors.warning : colors.success,
+        };
+      } else {
+        // Skip marking weekends as absent if desired, but we'll mark all absent for now
+        const dayOfWeek = d.getDay();
+        if (dayOfWeek !== 0 && dayOfWeek !== 6) {
+          dates[dateStr] = {
+            selected: true,
+            selectedColor: colors.error,
+          };
+        }
+      }
+    }
+    return dates;
+  }, [allRecords]);
 
   return (
     <SafeAreaWrapper>
-      <View style={styles.container}>
-        {/* Header */}
+      <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
         <View style={styles.header}>
-          <Text style={typography.h2}>Attendance History</Text>
+          <Text style={typography.h2}>Attendance Calendar</Text>
         </View>
 
-        {/* Search */}
-        <View style={styles.searchWrap}>
-          <Text style={styles.searchIcon}>🔍</Text>
-          <TextInput
-            style={styles.searchInput}
-            placeholder="Search by date or status…"
-            placeholderTextColor={colors.textHint}
-            value={search}
-            onChangeText={setSearch}
+        <View style={styles.calendarWrap}>
+          <Calendar
+            markedDates={markedDates}
+            theme={{
+              backgroundColor: colors.white,
+              calendarBackground: colors.white,
+              textSectionTitleColor: colors.textSecondary,
+              selectedDayBackgroundColor: colors.primary,
+              selectedDayTextColor: '#ffffff',
+              todayTextColor: colors.primary,
+              dayTextColor: colors.textPrimary,
+              textDisabledColor: '#d9e1e8',
+              dotColor: colors.primary,
+              selectedDotColor: '#ffffff',
+              arrowColor: colors.primary,
+              disabledArrowColor: '#d9e1e8',
+              monthTextColor: colors.textPrimary,
+              textDayFontWeight: '500',
+              textMonthFontWeight: 'bold',
+              textDayHeaderFontWeight: '500',
+            }}
           />
-          {!!search && (
-            <TouchableOpacity onPress={() => setSearch('')} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-              <Text style={{ color: colors.textHint, fontSize: fs(16) }}>✕</Text>
-            </TouchableOpacity>
+        </View>
+        
+        <View style={styles.legend}>
+          <View style={styles.legendItem}>
+            <View style={[styles.dot, { backgroundColor: colors.success }]} />
+            <Text style={styles.legendText}>Present</Text>
+          </View>
+          <View style={styles.legendItem}>
+            <View style={[styles.dot, { backgroundColor: colors.error }]} />
+            <Text style={styles.legendText}>Absent</Text>
+          </View>
+        </View>
+        <View style={styles.detailsContainer}>
+          <Text style={styles.detailsTitle}>Detailed Offline Logs</Text>
+          {detailedRecords.length === 0 ? (
+            <Text style={styles.emptyText}>No detailed logs found. All heavy data has been purged to AWS.</Text>
+          ) : (
+            detailedRecords.map(record => (
+              <View key={record.id} style={styles.recordCard}>
+                <View style={styles.recordHeader}>
+                  <Text style={styles.recordDate}>{record.date}</Text>
+                  <Text style={[
+                    styles.recordStatus, 
+                    { color: record.status === 'present' ? colors.success : colors.error }
+                  ]}>
+                    {record.status.toUpperCase()}
+                  </Text>
+                </View>
+                <Text style={styles.recordTime}>Entry: {record.entryTime ?? '--:--'}</Text>
+              </View>
+            ))
           )}
         </View>
-
-        {/* Summary */}
-        <View style={styles.summaryRow}>
-          {(['present', 'absent', 'late'] as const).map((s) => {
-            const count = records.filter((r) => r.status === s).length;
-            return (
-              <View key={s} style={styles.summaryCard}>
-                <Text style={styles.summaryCount}>{count}</Text>
-                <Text style={styles.summaryLabel}>{s.charAt(0).toUpperCase() + s.slice(1)}</Text>
-              </View>
-            );
-          })}
-        </View>
-
-        {/* List */}
-        <FlatList
-          data={records}
-          keyExtractor={(r) => r.id}
-          renderItem={renderItem}
-          ListEmptyComponent={ListEmpty}
-          contentContainerStyle={styles.list}
-          showsVerticalScrollIndicator={false}
-          ItemSeparatorComponent={() => <View style={styles.sep} />}
-        />
-      </View>
+      </ScrollView>
     </SafeAreaWrapper>
   );
 };
 
 const styles = StyleSheet.create({
-  container: { flex: 1, paddingTop: spacing.lg },
-  header: { paddingHorizontal: spacing.xl, marginBottom: spacing.md },
-  searchWrap: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: colors.white,
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: radius.sm,
-    marginHorizontal: spacing.xl,
-    paddingHorizontal: spacing.md,
-    height: 48,
-    marginBottom: spacing.md,
-  },
-  searchIcon: { fontSize: 16, marginRight: spacing.sm },
-  searchInput: {
-    flex: 1,
-    fontSize: fs(14),
-    color: colors.textPrimary,
-  },
-  summaryRow: {
-    flexDirection: 'row',
-    paddingHorizontal: spacing.xl,
-    gap: spacing.md,
-    marginBottom: spacing.md,
-  },
-  summaryCard: {
-    flex: 1,
-    backgroundColor: colors.white,
-    borderRadius: radius.sm,
-    borderWidth: 1,
-    borderColor: colors.border,
-    alignItems: 'center',
-    paddingVertical: spacing.sm,
-  },
-  summaryCount: { fontSize: fs(18), fontWeight: '700', color: colors.textPrimary },
-  summaryLabel: { fontSize: fs(11), color: colors.textSecondary },
-  list: { paddingHorizontal: spacing.xl, paddingBottom: spacing.xxl },
-  row: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: colors.white,
+  container: { flex: 1, paddingTop: spacing.lg, paddingHorizontal: spacing.xl },
+  header: { marginBottom: spacing.xl },
+  calendarWrap: {
     borderRadius: radius.md,
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.white,
+    paddingBottom: spacing.sm,
+  },
+  legend: {
+    flexDirection: 'row',
+    marginTop: spacing.xl,
+    gap: spacing.xl,
+    justifyContent: 'center',
+  },
+  legendItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
+  dot: {
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+  },
+  legendText: {
+    ...typography.bodyBold,
+    color: colors.textSecondary,
+  },
+  detailsContainer: {
+    marginTop: spacing.xxl,
+    marginBottom: spacing.xxl,
+  },
+  detailsTitle: {
+    ...typography.h3,
+    marginBottom: spacing.md,
+  },
+  emptyText: {
+    ...typography.body,
+    color: colors.textSecondary,
+    fontStyle: 'italic',
+  },
+  recordCard: {
+    backgroundColor: colors.white,
     padding: spacing.md,
+    borderRadius: radius.md,
+    marginBottom: spacing.sm,
     borderWidth: 1,
     borderColor: colors.border,
   },
-  dateBlock: {
-    alignItems: 'center',
-    marginRight: spacing.md,
-    minWidth: 36,
+  recordHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: spacing.xs,
   },
-  dayNum: { fontSize: fs(18), fontWeight: '700', color: colors.primary },
-  month: { fontSize: fs(11), color: colors.textSecondary },
-  details: { flex: 1 },
-  dateLabel: { ...typography.bodyBold, fontSize: fs(14) },
-  times: { ...typography.small, marginTop: 2 },
-  sep: { height: spacing.sm },
-  empty: {
-    alignItems: 'center',
-    paddingTop: spacing.xxl,
-    gap: spacing.sm,
+  recordDate: {
+    ...typography.bodyBold,
+  },
+  recordStatus: {
+    ...typography.smallBold,
+  },
+  recordTime: {
+    ...typography.small,
+    color: colors.textSecondary,
   },
 });

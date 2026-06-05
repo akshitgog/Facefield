@@ -136,8 +136,48 @@ class FaceAuthFrameProcessorPlugin(
             )
         }
 
+        // ----------------------------------------------------------
+        // 4. Quality Checks (Lighting, Sharpness, Rotation)
+        //    BUG FIX: Evaluate on FACE CROP, not full camera frame!
+        //    The full frame has dark background that drags brightness down.
+        // ----------------------------------------------------------
+        val faceCropForQuality = ImageCropUtils.getAlignedFaceCrop(bitmap, faceBox, 112, 112)
+        val qualityResult = com.datalakeauth.preprocessing.FaceQualityChecker.evaluate(faceCropForQuality)
+        val eyesVisible = landmarks.isNotEmpty() 
+        
+        // Calculate Roll (tilt) to prevent upside down / sideways
+        // Eye 33 (left) and 263 (right)
+        val leftEye = landmarks[33]
+        val rightEye = landmarks[263]
+        val dY = (rightEye.y - leftEye.y).toDouble()
+        val dX = (rightEye.x - leftEye.x).toDouble()
+        val rollAngle = Math.toDegrees(kotlin.math.atan2(dY, dX))
+        val isStraight = kotlin.math.abs(rollAngle) < 30.0
+
+        // brightnessAvg is 0.0-1.0 percentage, convert to 0-255 scale
+        val brightness255 = qualityResult.brightnessAvg * 255f
+
+        android.util.Log.d("FaceAuth", "QUALITY_DEBUG brightness255=$brightness255 sharpness=${qualityResult.sharpnessScore} roll=$rollAngle straight=$isStraight eyes=$eyesVisible mode=$mode")
+
         if (mode == "registration") {
-            // 1. Active Liveness (Blink, Smile, Turn Head)
+            // REGISTRATION REQUIREMENTS:
+            // - Face Centered (center point in middle 50% of screen)
+            // - Eyes Visible
+            // - Sharpness > 5
+            // - Brightness: 50 to 200
+            // - Face Straight (Roll < 30)
+            val faceCenterX = faceBox.x + (faceBox.width / 2f)
+            val faceCenterY = faceBox.y + (faceBox.height / 2f)
+            val isCentered = faceCenterX > bitmap.width * 0.25f && faceCenterX < bitmap.width * 0.75f &&
+                             faceCenterY > bitmap.height * 0.25f && faceCenterY < bitmap.height * 0.75f
+                             
+            val brightnessOk = brightness255 in 50f..200f
+            val sharpnessOk = qualityResult.sharpnessScore > 5.0f
+            val qualityPassed = brightnessOk && sharpnessOk && eyesVisible && isCentered && isStraight
+
+            android.util.Log.d("FaceAuth", "REG_QUALITY pass=$qualityPassed bright=$brightnessOk(val=$brightness255) sharp=$sharpnessOk(val=${qualityResult.sharpnessScore}) center=$isCentered(cx=$faceCenterX cy=$faceCenterY imgW=${bitmap.width} imgH=${bitmap.height}) straight=$isStraight(roll=$rollAngle)")
+
+            // Active Liveness (Blink, Smile, Turn Head)
             val liveness = ActiveLivenessEngine.evaluate(
                 landmarks = landmarks,
                 faceBoxX = faceBox.x,
@@ -145,26 +185,15 @@ class FaceAuthFrameProcessorPlugin(
                 faceBoxW = faceBox.width,
                 faceBoxH = faceBox.height
             )
-            android.util.Log.d("FaceAuth", "LIVENESS blink=${liveness.blinkDetected} smile=${liveness.smileDetected} head=${liveness.headTurnDetected} pass=${liveness.livenessPass}")
 
-            // 2. Quality Checks
-            val faceSizeOk = faceBox.width >= bitmap.width * 0.3f && faceBox.height >= bitmap.height * 0.3f
-            val faceCentered = Math.abs((faceBox.x + faceBox.width / 2f) - (bitmap.width / 2f)) < bitmap.width * 0.2f
-            val lightingGood = true // Stub for lighting, usually checked via histogram
-            val eyesVisible = landmarks.isNotEmpty() // If FaceMesh worked, eyes are visible
-
-            val qualityPassed = faceSizeOk && faceCentered && lightingGood && eyesVisible
-            android.util.Log.d("FaceAuth", "QUALITY pass=$qualityPassed size=$faceSizeOk center=$faceCentered eyes=$eyesVisible")
-
-            if (!liveness.livenessPass || !qualityPassed) {
+            // For Registration, we require good quality.
+            if (!qualityPassed) {
                 return mapOf(
                     "status" to "RETRY",
-                    "reason" to "Please center face and blink/smile.",
+                    "reason" to "", // Silent wait, no annoying popup messages
                     "faceDetected" to true,
                     "qualityPassed" to qualityPassed,
-                    "faceSizeOk" to faceSizeOk,
-                    "faceCentered" to faceCentered,
-                    "lightingGood" to lightingGood,
+                    "lightingGood" to brightnessOk,
                     "eyesVisible" to eyesVisible,
                     "blinkDetected" to liveness.blinkDetected,
                     "smileDetected" to liveness.smileDetected,
@@ -172,16 +201,17 @@ class FaceAuthFrameProcessorPlugin(
                 )
             }
 
-            // If quality & liveness pass:
+            // If quality passes:
             val embedding = orchestrator.extractRegistrationEmbedding(bitmap, faceBox)
-            android.util.Log.d("FaceAuth", "EMBEDDING size=${embedding.size}")
-
-            // Crop face to 112×112 and encode as base64 for permanent JS storage
-            val alignedCrop = ImageCropUtils.getAlignedFaceCrop(bitmap, faceBox, 112, 112)
-            val baos = java.io.ByteArrayOutputStream()
-            alignedCrop.compress(Bitmap.CompressFormat.JPEG, 85, baos)
+            
+            // Crop face to 400x400 with a wider margin (1.8x) for high-quality UI preview
+            val displayCrop = ImageCropUtils.getDisplayFaceCrop(bitmap, faceBox, 400, 400)
+            
+            val byteArrayOutputStream = java.io.ByteArrayOutputStream()
+            displayCrop.compress(Bitmap.CompressFormat.JPEG, 90, byteArrayOutputStream)
             val faceBase64 = android.util.Base64.encodeToString(
-                baos.toByteArray(), android.util.Base64.NO_WRAP
+                byteArrayOutputStream.toByteArray(), 
+                android.util.Base64.NO_WRAP
             )
 
             return mapOf(
@@ -190,32 +220,58 @@ class FaceAuthFrameProcessorPlugin(
                 "faceBase64" to faceBase64,
                 "faceDetected" to true,
                 "qualityPassed" to true,
-                "faceSizeOk" to true,
-                "faceCentered" to true,
                 "lightingGood" to true,
                 "eyesVisible" to true
             )
         }
 
         // ----------------------------------------------------------
-        // 4. Attendance Mode: Run the full parallel pipeline
+        // 4. Attendance Mode (Recognition)
         // ----------------------------------------------------------
+        // RECOGNITION REQUIREMENTS:
+        // - NO face centered requirement
+        // - Liveness (Blink, Smile, Turn) — checked inside orchestrator
+        // - Brightness: 50 to 200
+        // - Sharpness > 5
+        // - Face Straight (Roll < 30)
+        
+        val brightnessOk = brightness255 in 50f..200f
+        val sharpnessOk = qualityResult.sharpnessScore > 5.0f
+        val qualityPassed = brightnessOk && sharpnessOk && isStraight
+
+        android.util.Log.d("FaceAuth", "ATT_QUALITY pass=$qualityPassed bright=$brightnessOk(val=$brightness255) sharp=$sharpnessOk(val=${qualityResult.sharpnessScore}) straight=$isStraight(roll=$rollAngle)")
         
         // PULL DIRECTLY FROM NATIVE SQLITE (Lightning fast!)
         val storedEmbeddings = dbHelper.getAllEmbeddings()
+        val qualityReason = "" // Silent, no annoying popup messages
 
         return orchestrator.verifyAttendance(
             bitmap = bitmap,
             faceBox = faceBox,
             faceMeshLandmarks = landmarks,
-            storedEmbeddings = storedEmbeddings
+            storedEmbeddings = storedEmbeddings,
+            qualityPassed = qualityPassed,
+            qualityReason = qualityReason
         )
     }
 
     private fun frameToBitmap(frame: Frame): Bitmap? {
         return try {
             val image = frame.getImage() ?: return null
-            YuvToRgbConverter.imageToBitmap(image)
+            val rawBmp = YuvToRgbConverter.imageToBitmap(image) ?: return null
+            
+            // Dynamically calculate rotation based on the frame's Orientation enum
+            val rotationDegrees = frame.orientation.toDegrees().toFloat()
+            
+            val matrix = android.graphics.Matrix()
+            matrix.postRotate(rotationDegrees)
+            
+            // Dynamically mirror the image if the frame says it is mirrored (front cameras)
+            if (frame.isMirrored) {
+                matrix.postScale(-1f, 1f)
+            }
+            
+            Bitmap.createBitmap(rawBmp, 0, 0, rawBmp.width, rawBmp.height, matrix, true)
         } catch (e: Exception) {
             null
         }

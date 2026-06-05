@@ -23,7 +23,7 @@ export const ForgotPasswordScreen: React.FC<Props> = ({ navigation }) => {
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
 
-  const { user: existingUser, updatePassword } = useUserStore();
+  const { registeredUsers, updatePassword } = useUserStore();
 
   const handleVerifyEmail = () => {
     if (!email.trim()) {
@@ -31,8 +31,10 @@ export const ForgotPasswordScreen: React.FC<Props> = ({ navigation }) => {
       return;
     }
     
-    // In a real app, this would query a backend. Here we check local storage.
-    if (existingUser && existingUser.email.toLowerCase() === email.toLowerCase()) {
+    const key = email.trim().toLowerCase();
+    const foundUser = registeredUsers[key];
+
+    if (foundUser) {
       setStep(2);
     } else {
       Alert.alert('Error', 'No account found with that email address.');
@@ -45,7 +47,10 @@ export const ForgotPasswordScreen: React.FC<Props> = ({ navigation }) => {
       return;
     }
 
-    if (existingUser && existingUser.favTeacher.toLowerCase() === answer.toLowerCase()) {
+    const key = email.trim().toLowerCase();
+    const foundUser = registeredUsers[key];
+
+    if (foundUser && foundUser.favTeacher.trim().toLowerCase() === answer.trim().toLowerCase()) {
       setStep(3);
     } else {
       Alert.alert('Error', 'Incorrect answer.');
@@ -62,7 +67,7 @@ export const ForgotPasswordScreen: React.FC<Props> = ({ navigation }) => {
       return;
     }
 
-    updatePassword(newPassword);
+    updatePassword(email, newPassword);
     Alert.alert('Success', 'Your password has been successfully updated.', [
       { text: 'OK', onPress: () => navigation.goBack() }
     ]);

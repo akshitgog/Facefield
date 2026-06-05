@@ -34,11 +34,7 @@ object SimpleAugmentation {
      */
     fun generateVariants(original: Bitmap): List<Bitmap> {
         return listOf(
-            original,                        // 0: Original
-            adjustBrightness(original, 20f),  // 1: Brightness +
-            adjustBrightness(original, -20f), // 2: Brightness -
-            adjustContrast(original, 1.15f),  // 3: Slight contrast
-            rotateSlightly(original, 3f)      // 4: Small rotation
+            original
         )
     }
 

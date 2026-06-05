@@ -24,10 +24,11 @@ type Props = CompositeScreenProps<
 
 export const DashboardScreen: React.FC<Props> = ({ navigation }) => {
   const { user } = useUserStore();
-  const { todayRecord } = useAttendanceStore();
+  const { todayRecord, syncAndPurgeDemo } = useAttendanceStore();
   const allRecords = useAttendanceStore((state) => state.records);
   const [greeting, setGreeting] = useState('Good morning');
   const [currentDateStr, setCurrentDateStr] = useState('');
+  const [isSyncing, setIsSyncing] = useState(false);
 
   useFocusEffect(
     useCallback(() => {
@@ -56,7 +57,7 @@ export const DashboardScreen: React.FC<Props> = ({ navigation }) => {
           </View>
           <View style={styles.avatar}>
             {user?.faceImageUri ? (
-              <Image source={{ uri: user.faceImageUri }} style={styles.avatarImage} />
+              <Image source={{ uri: user.faceImageUri }} style={styles.avatarImage} resizeMode="cover" />
             ) : (
               <Text style={styles.avatarText}>{initials}</Text>
             )}
@@ -77,19 +78,13 @@ export const DashboardScreen: React.FC<Props> = ({ navigation }) => {
               {todayRecord?.entryTime ?? '—'}
             </Text>
           </Card>
-          <Card style={styles.statCard}>
-            <Text style={styles.statLabel}>Exit Time</Text>
-            <Text style={styles.statVal}>
-              {todayRecord?.exitTime ?? '—'}
-            </Text>
-          </Card>
         </View>
 
         {/* Status badge */}
         <Card style={styles.statusCard}>
           <View style={styles.statusRow}>
             <Text style={typography.bodyBold}>Today's Status</Text>
-            <StatusBadge status={todayRecord?.status ?? 'absent'} />
+            <StatusBadge status={todayRecord?.status ?? 'pending'} />
           </View>
           <Text style={[typography.small, { marginTop: 4 }]}> 
             {currentDateStr}
@@ -183,13 +178,25 @@ export const DashboardScreen: React.FC<Props> = ({ navigation }) => {
             </Text>
           </View>
           <Button
-            label="Sync to AWS (Purge Local)"
-            onPress={() => {
-              // TODO: Implement actual AWS Sync logic scoped for deployment
-              Alert.alert(
-                'Sync to AWS',
-                'Syncing to AWS...\n\n(For deployment scope: Attendance synced successfully. Local records purged.)'
-              );
+            label={isSyncing ? "Syncing..." : "Sync to AWS (Purge Local)"}
+            disabled={isSyncing || allRecords.length === 0}
+            onPress={async () => {
+              setIsSyncing(true);
+              try {
+                const count = await syncAndPurgeDemo();
+                if (count > 0) {
+                  Alert.alert(
+                    'AWS Sync Successful',
+                    `Successfully uploaded ${count} records to AWS. Local records have been purged to save space.`
+                  );
+                } else {
+                  Alert.alert('AWS Sync', 'All records are already synced.');
+                }
+              } catch (e) {
+                Alert.alert('Sync Failed', 'Could not connect to AWS. Try again later.');
+              } finally {
+                setIsSyncing(false);
+              }
             }}
             variant="outline"
             style={styles.syncBtn}

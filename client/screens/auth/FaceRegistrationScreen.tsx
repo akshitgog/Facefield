@@ -7,6 +7,7 @@ import {
   Alert,
   Dimensions,
   ScrollView,
+  Image,
 } from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { Button, SafeAreaWrapper } from '../../components';
@@ -29,10 +30,7 @@ export const FaceRegistrationScreen: React.FC<Props> = ({ navigation }) => {
   const [phase, setPhase] = useState<'idle' | 'camera' | 'processing' | 'success'>('idle');
   const [indicators, setIndicators] = useState<Indicator[]>([
     { label: 'Face detected', status: 'idle' },
-    { label: 'Lighting good', status: 'idle' },
-    { label: 'Face centered', status: 'idle' },
-    { label: 'Eyes visible', status: 'idle' },
-    { label: 'Face size OK', status: 'idle' },
+    { label: 'Face aligned', status: 'idle' }
   ]);
   const [photoUri, setPhotoUri] = useState<string | undefined>();
   const photoUriRef = React.useRef<string | undefined>();
@@ -65,18 +63,12 @@ export const FaceRegistrationScreen: React.FC<Props> = ({ navigation }) => {
       if (result.faceDetected) {
         setIndicators([
           { label: 'Face detected', status: 'ok' },
-          { label: 'Lighting good', status: result.lightingGood ? 'ok' : 'warn' },
-          { label: 'Face centered', status: result.faceCentered ? 'ok' : 'warn' },
-          { label: 'Eyes visible', status: result.eyesVisible ? 'ok' : 'warn' },
-          { label: 'Face size OK', status: result.faceSizeOk ? 'ok' : 'warn' },
+          { label: 'Quality & Lighting', status: result.qualityPassed ? 'ok' : 'warn' },
         ]);
       } else {
         setIndicators([
           { label: 'Face detected', status: 'warn' },
-          { label: 'Lighting good', status: 'idle' },
-          { label: 'Face centered', status: 'idle' },
-          { label: 'Eyes visible', status: 'idle' },
-          { label: 'Face size OK', status: 'idle' },
+          { label: 'Quality & Lighting', status: 'idle' }
         ]);
       }
 
@@ -121,8 +113,12 @@ export const FaceRegistrationScreen: React.FC<Props> = ({ navigation }) => {
     return (
       <SafeAreaWrapper>
         <View style={styles.successContainer}>
-          <View style={styles.successCircle}>
-            <Text style={styles.checkmark}>✓</Text>
+          <View style={[styles.successCircle, { overflow: 'hidden' }]}>
+            {user?.faceImageUri ? (
+              <Image source={{ uri: user.faceImageUri }} style={{ width: '100%', height: '100%' }} resizeMode="cover" />
+            ) : (
+              <Text style={styles.checkmark}>✓</Text>
+            )}
           </View>
           <Text style={[typography.h2, { marginBottom: spacing.sm, textAlign: 'center' }]}>
             Face Registered
@@ -162,7 +158,7 @@ export const FaceRegistrationScreen: React.FC<Props> = ({ navigation }) => {
         <View style={styles.header}>
           <Text style={typography.h2}>Register Your Face</Text>
           <Text style={typography.small}>
-            Please blink, smile, or turn your head slightly during capture.
+            Hold still to complete registration.
           </Text>
         </View>
 
@@ -240,10 +236,7 @@ export const FaceRegistrationScreen: React.FC<Props> = ({ navigation }) => {
             setPhase('idle');
             setIndicators([
               { label: 'Face detected', status: 'idle' },
-              { label: 'Lighting good', status: 'idle' },
-              { label: 'Face centered', status: 'idle' },
-              { label: 'Eyes visible', status: 'idle' },
-              { label: 'Face size OK', status: 'idle' },
+              { label: 'Face aligned', status: 'idle' }
             ]);
           }}
           variant="outline"

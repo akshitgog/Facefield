@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
   View,
   Text,
@@ -7,6 +7,7 @@ import {
   TouchableOpacity,
   Alert,
   Image,
+  Modal,
 } from 'react-native';
 import { BottomTabScreenProps } from '@react-navigation/bottom-tabs';
 import { SafeAreaWrapper, Card, Button, StatusBadge } from '../../components';
@@ -25,6 +26,7 @@ type Props = CompositeScreenProps<
 
 export const ProfileScreen: React.FC<Props> = ({ navigation }) => {
   const { user, logout } = useUserStore();
+  const [modalVisible, setModalVisible] = useState(false);
 
   const initials = user?.name
     ? user.name.split(' ').map((n) => n[0]).join('').toUpperCase().slice(0, 2)
@@ -42,13 +44,13 @@ export const ProfileScreen: React.FC<Props> = ({ navigation }) => {
       {/* Fixed Header */}
       <View style={styles.fixedHeader}>
         <View style={styles.avatarSection}>
-          <View style={styles.avatar}>
+          <TouchableOpacity style={styles.avatar} onPress={() => setModalVisible(true)}>
             {user?.faceImageUri ? (
-              <Image source={{ uri: user.faceImageUri }} style={styles.avatarImage} />
+              <Image source={{ uri: user.faceImageUri }} style={styles.avatarImage} resizeMode="cover" />
             ) : (
               <Text style={styles.avatarText}>{initials}</Text>
             )}
-          </View>
+          </TouchableOpacity>
           <Text style={[typography.h2, { color: colors.white }]}>{user?.name}</Text>
           <Text style={[typography.small, { color: 'rgba(255,255,255,0.8)' }]}>{user?.email}</Text>
         </View>
@@ -79,13 +81,13 @@ export const ProfileScreen: React.FC<Props> = ({ navigation }) => {
         {/* Face Registration */}
         <Card style={styles.faceCard}>
           <View style={styles.faceRow}>
-            <View style={styles.facePrev}>
+            <TouchableOpacity style={styles.facePrev} onPress={() => setModalVisible(true)}>
               {user?.faceImageUri ? (
-                <Image source={{ uri: user.faceImageUri }} style={styles.faceImage} />
+                <Image source={{ uri: user.faceImageUri }} style={styles.faceImage} resizeMode="cover" />
               ) : (
                 <Text style={styles.faceIcon}>🪪</Text>
               )}
-            </View>
+            </TouchableOpacity>
             <View style={{ flex: 1, marginLeft: spacing.md }}>
               <Text style={typography.bodyBold}>Registered Face</Text>
               <Text style={[typography.small, { marginTop: 4 }]}> 
@@ -115,14 +117,39 @@ export const ProfileScreen: React.FC<Props> = ({ navigation }) => {
         </View>
 
         {/* Logout */}
-        <Button
-          label="Logout"
-          onPress={handleLogout}
-          variant="danger"
-          size="lg"
-          style={{ marginTop: spacing.md }}
+        <Button 
+          label="Logout" 
+          onPress={handleLogout} 
+          variant="outline" 
+          style={{ borderColor: colors.error }} 
+          textStyle={{ color: colors.error }} 
         />
       </ScrollView>
+
+      {/* Image Preview Modal */}
+      <Modal visible={modalVisible} transparent={true} animationType="fade">
+        <View style={styles.modalOverlay}>
+          <TouchableOpacity 
+            style={styles.modalClose} 
+            onPress={() => setModalVisible(false)}
+            activeOpacity={1}
+          />
+          <View style={styles.modalContent}>
+            {user?.faceImageUri ? (
+              <Image 
+                source={{ uri: user.faceImageUri }} 
+                style={styles.modalImage} 
+                resizeMode="contain" 
+              />
+            ) : (
+              <Text style={typography.h3}>No Image Registered</Text>
+            )}
+            <TouchableOpacity style={styles.closeBtn} onPress={() => setModalVisible(false)}>
+              <Text style={styles.closeBtnText}>Close</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaWrapper>
   );
 };
@@ -204,7 +231,13 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   faceImage: { width: '100%', height: '100%' },
-  faceIcon: { fontSize: 24 },
+  faceIcon: { fontSize: fs(24) },
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.8)', justifyContent: 'center', alignItems: 'center' },
+  modalClose: { ...StyleSheet.absoluteFillObject },
+  modalContent: { width: '85%', backgroundColor: colors.white, borderRadius: radius.lg, padding: spacing.xl, alignItems: 'center' },
+  modalImage: { width: 300, height: 300, borderRadius: radius.md, marginBottom: spacing.xl, backgroundColor: '#f0f0f0' },
+  closeBtn: { backgroundColor: colors.primary, paddingVertical: spacing.md, paddingHorizontal: spacing.xl, borderRadius: radius.md, width: '100%', alignItems: 'center' },
+  closeBtnText: { color: colors.white, fontSize: fs(16), fontWeight: '600' as const },
   appInfo: { alignItems: 'center', marginTop: spacing.md },
   appInfoText: { fontSize: fs(11), color: colors.textHint },
 });

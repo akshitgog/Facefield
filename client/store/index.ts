@@ -23,9 +23,9 @@ export interface AttendanceRecord {
   id: string;
   date: string;        // 'YYYY-MM-DD'
   entryTime?: string;  // 'HH:MM'
-  exitTime?: string;
   status: 'present' | 'absent' | 'late';
   synced: boolean;
+  isPurged?: boolean;
 }
 
 // ── User Store ───────────────────────────────────────────────────────────────
@@ -40,7 +40,7 @@ interface UserState {
   setToken: (t: string) => void;
   logout: () => void;
   setFaceRegistered: (uri?: string) => void;
-  updatePassword: (password: string) => void;
+  updatePassword: (email: string, password: string) => void;
 }
 
 export const useUserStore = create<UserState>()(
@@ -66,14 +66,15 @@ export const useUserStore = create<UserState>()(
         set((s) => ({
           user: s.user ? { ...s.user, faceRegistered: true, faceImageUri: uri } : null,
         })),
-      updatePassword: (password: string) =>
+      updatePassword: (email: string, password: string) =>
         set((s) => {
-          if (!s.user) return {};
-          const updated = { ...s.user, password };
-          const key = s.user.email.toLowerCase();
+          const key = email.trim().toLowerCase();
+          const targetUser = s.registeredUsers[key];
+          if (!targetUser) return {};
+          const updated = { ...targetUser, password };
           return {
-            user: updated,
             registeredUsers: { ...s.registeredUsers, [key]: updated },
+            ...(s.user?.email.trim().toLowerCase() === key ? { user: updated } : {})
           };
         }),
     }),
@@ -89,9 +90,9 @@ interface AttendanceState {
   records: AttendanceRecord[];
   todayRecord: AttendanceRecord | null;
   addRecord: (r: AttendanceRecord) => void;
-  markExit: (id: string, exitTime: string) => void;
   setTodayRecord: (r: AttendanceRecord | null) => void;
   getHistory: () => AttendanceRecord[];
+  syncAndPurgeDemo: () => Promise<number>;
 }
 
 const today = () => new Date().toISOString().split('T')[0];
@@ -108,18 +109,6 @@ export const useAttendanceStore = create<AttendanceState>()(
           todayRecord: r.date === today() ? r : s.todayRecord,
         })),
 
-      markExit: (id, exitTime) =>
-        set((s) => {
-          const records = s.records.map((r) =>
-            r.id === id ? { ...r, exitTime } : r
-          );
-          const todayRecord =
-            s.todayRecord?.id === id
-              ? { ...s.todayRecord, exitTime }
-              : s.todayRecord;
-          return { records, todayRecord };
-        }),
-
       setTodayRecord: (r) => set({ todayRecord: r }),
 
       getHistory: () => {
@@ -127,6 +116,29 @@ export const useAttendanceStore = create<AttendanceState>()(
         return [...s.records].sort(
           (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()
         );
+      },
+
+      syncAndPurgeDemo: async () => {
+        const s = get();
+        const recordsToSync = s.records.filter(r => !r.synced);
+        if (recordsToSync.length === 0) return 0;
+
+        // 1. Simulate AWS Network Request
+        await new Promise(resolve => setTimeout(resolve, 1500));
+
+        // 2. Mark as Synced & Purge (Local device cleanup)
+        set((state) => {
+          // Keep the records for the Calendar UI, but mark them as purged.
+          // This simulates deleting the heavy logs but keeping the date summary.
+          const updatedRecords = state.records.map(r => 
+            !r.synced ? { ...r, synced: true, isPurged: true } : r
+          );
+          return {
+            records: updatedRecords
+          };
+        });
+
+        return recordsToSync.length;
       },
     }),
     {

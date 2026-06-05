@@ -22,6 +22,8 @@ type Props = NativeStackScreenProps<RootStackParamList, 'AttendanceVerification'
 export const AttendanceVerificationScreen: React.FC<Props> = ({ navigation }) => {
   const [verifying, setVerifying] = useState(false);
   const [scanStatus, setScanStatus] = useState<'idle' | 'scanning' | 'verifying' | 'done'>('idle');
+  const [spoofPassed, setSpoofPassed] = useState(false);
+  const [activePassed, setActivePassed] = useState(false);
   const { addRecord } = useAttendanceStore();
 
   const { hasPermission, requestPermission } = useCameraPermission();
@@ -44,15 +46,26 @@ export const AttendanceVerificationScreen: React.FC<Props> = ({ navigation }) =>
 
   const { frameProcessor } = useFaceAuth({
     mode: 'attendance',
-    throttleMs: 200,
     onResult: (result: FaceAuthResult) => {
       // Only process if we are actively scanning
       if (scanStatus !== 'scanning') return;
 
+      if (result.status === 'RETRY') {
+        if (result.isLive) setSpoofPassed(true);
+        if (result.blinkDetected || result.smileDetected || result.headTurnDetected) setActivePassed(true);
+      }
       if (result.status === 'ACCEPT') {
+        setSpoofPassed(true);
+        setActivePassed(true);
         handleVerified(result.matchedUserId ?? 'unknown');
       }
       if (result.status === 'REJECT') {
+        if (!result.isLive) {
+          setSpoofPassed(false);
+        } else {
+          setSpoofPassed(true);
+          setActivePassed(true);
+        }
         setScanStatus('idle');
         Alert.alert('Verification Failed', result.reason);
       }
@@ -126,9 +139,20 @@ export const AttendanceVerificationScreen: React.FC<Props> = ({ navigation }) =>
         ) : scanStatus === 'scanning' ? (
           <View style={styles.livenessContainer}>
             <Text style={styles.panelTitle}>Active Liveness</Text>
-            <Text style={styles.panelSub}>
-              Please blink, smile, or turn your head slightly.
-            </Text>
+            <View style={styles.checksContainer}>
+              <View style={styles.checkRow}>
+                <Text style={styles.checkIcon}>{activePassed ? '🟢' : '◯'}</Text>
+                <Text style={[styles.checkText, activePassed && styles.checkTextActive]}>
+                  Blink, smile, or turn head
+                </Text>
+              </View>
+              <View style={styles.checkRow}>
+                <Text style={styles.checkIcon}>{spoofPassed ? '🟢' : '◯'}</Text>
+                <Text style={[styles.checkText, spoofPassed && styles.checkTextActive]}>
+                  Real face detected (No spoof)
+                </Text>
+              </View>
+            </View>
             <View style={styles.scanningBadge}>
               <Text style={styles.scanningText}>⚡ Scanning Face...</Text>
             </View>
@@ -218,6 +242,11 @@ const styles = StyleSheet.create({
   panelTitle: { ...typography.h3, marginBottom: 8, textAlign: 'center' as const },
   panelSub: { ...typography.body, marginBottom: spacing.xl, textAlign: 'center' as const, color: colors.textSecondary },
   livenessContainer: { alignItems: 'center' as const, paddingTop: spacing.md },
+  checksContainer: { width: '100%', paddingHorizontal: spacing.xl, marginBottom: spacing.lg, gap: 12 },
+  checkRow: { flexDirection: 'row', alignItems: 'center' as const, gap: 10 },
+  checkIcon: { fontSize: fs(18) },
+  checkText: { ...typography.body, color: colors.textSecondary },
+  checkTextActive: { color: colors.success, fontWeight: '600' as const },
   scanningBadge: {
     backgroundColor: 'rgba(52, 199, 89, 0.15)',
     paddingVertical: spacing.md,

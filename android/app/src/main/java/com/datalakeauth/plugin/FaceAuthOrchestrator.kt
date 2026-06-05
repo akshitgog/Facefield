@@ -50,56 +50,68 @@ class FaceAuthOrchestrator(context: Context) {
         faceBox: FaceBox,
         faceMeshLandmarks: List<LandmarkPoint>,
         storedEmbeddings: Map<String, FloatArray>,
-        similarityThreshold: Float = 0.4f
+        similarityThreshold: Float = 0.70f, // INCREASED to 0.70f (0.4f is too low and matches almost anyone)
+        qualityPassed: Boolean = true,
+        qualityReason: String? = null
     ): Map<String, Any?> {
 
         // ============================================================
-        // STEP 1 & 2: Run Active Liveness + SilentFace IN PARALLEL
-        //
-        // Active Liveness = pure math on landmarks (microseconds)
-        // SilentFace = TFLite model inference (milliseconds)
-        // Both use the same frame and face box, no dependency.
+        // STEP 0: Face Quality Check
         // ============================================================
-        val (liveness, spoofResult) = runBlocking {
-            val livenessDeferred = async {
-                ActiveLivenessEngine.evaluate(
-                    landmarks = faceMeshLandmarks,
-                    faceBoxX = faceBox.x,
-                    faceBoxY = faceBox.y,
-                    faceBoxW = faceBox.width,
-                    faceBoxH = faceBox.height
-                )
-            }
-            val spoofDeferred = async {
-                silentFaceEngine.verify(bitmap, faceBox)
-            }
-            Pair(livenessDeferred.await(), spoofDeferred.await())
+        if (!qualityPassed) {
+            return buildResult(
+                status = "RETRY",
+                reason = qualityReason ?: "Poor image quality. Please adjust lighting or hold still.",
+                isLive = null,
+                liveScore = null,
+                spoofScore = null,
+                qualityPassed = false,
+                liveness = null
+            )
         }
 
-        // ---------- Evaluate parallel results ----------
+        // ============================================================
+        // STEP 1: Active Liveness (Pure Math, very fast)
+        // ============================================================
+        val liveness = ActiveLivenessEngine.evaluate(
+            landmarks = faceMeshLandmarks,
+            faceBoxX = faceBox.x,
+            faceBoxY = faceBox.y,
+            faceBoxW = faceBox.width,
+            faceBoxH = faceBox.height
+        )
 
-        // Spoof detected → REJECT immediately
-        if (!spoofResult.isLive) {
+        // Active liveness not yet triggered → RETRY (user hasn't blinked/smiled/turned)
+        if (!liveness.livenessPass) {
+            android.util.Log.d("FaceAuth", "LIVENESS_DEBUG failed. blink=${liveness.blinkDetected} smile=${liveness.smileDetected} turn=${liveness.headTurnDetected}")
             return buildResult(
-                status = "REJECT",
-                reason = "Spoof detected. This does not appear to be a live face.",
-                isLive = false,
-                liveScore = spoofResult.liveScore,
-                spoofScore = spoofResult.spoofScore,
-                qualityPassed = false,
+                status = "RETRY",
+                reason = "Please blink, smile, or turn your head slightly.",
+                isLive = null,
+                liveScore = null,
+                spoofScore = null,
+                qualityPassed = true,
                 liveness = liveness
             )
         }
 
-        // Active liveness not yet triggered → RETRY (user hasn't blinked/smiled/turned)
-        if (!liveness.livenessPass) {
+        // ============================================================
+        // STEP 2: SilentFace Anti-Spoof (TFLite Inference)
+        // Runs ONLY after liveness passes, saving massive battery.
+        // ============================================================
+        val spoofResult = silentFaceEngine.verify(bitmap, faceBox)
+        
+        android.util.Log.d("FaceAuth", "SPOOF_DEBUG isLive=${spoofResult.isLive} liveScore=${spoofResult.liveScore} spoofScore=${spoofResult.spoofScore}")
+
+        // Spoof detected → RETRY instead of immediate REJECT to allow continuous scanning
+        if (!spoofResult.isLive) {
             return buildResult(
                 status = "RETRY",
-                reason = "Please blink, smile, or turn your head slightly.",
-                isLive = true,
+                reason = "Spoof detected. This does not appear to be a live face.",
+                isLive = false,
                 liveScore = spoofResult.liveScore,
                 spoofScore = spoofResult.spoofScore,
-                qualityPassed = false,
+                qualityPassed = true,
                 liveness = liveness
             )
         }
@@ -110,6 +122,8 @@ class FaceAuthOrchestrator(context: Context) {
         // ============================================================
         val embedding = faceNetEngine.extractEmbedding(bitmap, faceBox)
         val matchResult = faceNetEngine.match(embedding, storedEmbeddings, similarityThreshold)
+
+        android.util.Log.d("FaceAuth", "RECOGNITION_DEBUG matched=${matchResult.matched} score=${matchResult.recognitionScore} userId=${matchResult.matchedUserId}")
 
         if (!matchResult.matched) {
             return buildResult(
@@ -162,11 +176,11 @@ class FaceAuthOrchestrator(context: Context) {
     private fun buildResult(
         status: String,
         reason: String,
-        isLive: Boolean,
-        liveScore: Float,
-        spoofScore: Float,
+        isLive: Boolean?,
+        liveScore: Float?,
+        spoofScore: Float?,
         qualityPassed: Boolean,
-        liveness: ActiveLivenessEngine.LivenessResult,
+        liveness: ActiveLivenessEngine.LivenessResult?,
         matchedUserId: String? = null,
         recognitionScore: Float? = null
     ): Map<String, Any?> {
@@ -176,12 +190,12 @@ class FaceAuthOrchestrator(context: Context) {
             "reason" to reason,
             "faceDetected" to true,
             "isLive" to isLive,
-            "liveScore" to liveScore.toDouble(),
-            "spoofScore" to spoofScore.toDouble(),
+            "liveScore" to liveScore?.toDouble(),
+            "spoofScore" to spoofScore?.toDouble(),
             "qualityPassed" to qualityPassed,
-            "blinkDetected" to liveness.blinkDetected,
-            "smileDetected" to liveness.smileDetected,
-            "headTurnDetected" to liveness.headTurnDetected,
+            "blinkDetected" to liveness?.blinkDetected,
+            "smileDetected" to liveness?.smileDetected,
+            "headTurnDetected" to liveness?.headTurnDetected,
             "matchedUserId" to matchedUserId,
             "recognitionScore" to recognitionScore?.toDouble()
         )

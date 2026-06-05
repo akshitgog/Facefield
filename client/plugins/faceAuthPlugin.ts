@@ -65,6 +65,8 @@ type UseFaceAuthOptions = {
   throttleMs?: number;
 };
 
+import { runAsync } from 'react-native-vision-camera';
+
 export function useFaceAuth({ mode, onResult, throttleMs = 500 }: UseFaceAuthOptions) {
   const lastRunTime = useSharedValue(0);
   const isProcessing = useSharedValue(false);
@@ -75,7 +77,6 @@ export function useFaceAuth({ mode, onResult, throttleMs = 500 }: UseFaceAuthOpt
     (frame) => {
       'worklet';
 
-      // Throttle: skip if we ran the heavy pipeline too recently
       const now = Date.now();
       if (now - lastRunTime.value < throttleMs) return;
       if (isProcessing.value) return;
@@ -83,17 +84,18 @@ export function useFaceAuth({ mode, onResult, throttleMs = 500 }: UseFaceAuthOpt
       isProcessing.value = true;
       lastRunTime.value = now;
 
-      try {
-        const result = faceAuth(frame, { mode });
+      runAsync(frame, () => {
+        'worklet';
+        try {
+          const result = faceAuth(frame, { mode });
 
-        if (result.status !== 'RETRY' || result.faceDetected) {
-          // Send result back to JS thread using JS call
-          // Worklets allows calling JS functions if they are captured
-          runOnJSResult(result);
+          if (result.status !== 'RETRY' || result.faceDetected) {
+            runOnJSResult(result);
+          }
+        } finally {
+          isProcessing.value = false;
         }
-      } finally {
-        isProcessing.value = false;
-      }
+      });
     },
     [mode, runOnJSResult, throttleMs]
   );
