@@ -7,8 +7,10 @@ import {
   StatusBar,
   TouchableOpacity,
   Alert,
+  AppState,
 } from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
+import { useIsFocused } from '@react-navigation/native';
 import { SafeAreaWrapper } from '../../components';
 import { colors, spacing, typography, radius, fs } from '../../theme';
 import { RootStackParamList } from '../../navigation/RootNavigator';
@@ -23,12 +25,28 @@ export const AttendanceVerificationScreen: React.FC<Props> = ({ navigation }) =>
   const [verifying, setVerifying] = useState(false);
   const [scanStatus, setScanStatus] = useState<'idle' | 'scanning' | 'verifying' | 'done'>('idle');
   const [feedbackMsg, setFeedbackMsg] = useState('Position your face in the oval.');
+  const [indicators, setIndicators] = useState([
+    { label: 'Face Detect', status: 'idle' },
+    { label: 'Quality & Lighting', status: 'idle' },
+    { label: 'Liveness (Blink/Smile)', status: 'idle' },
+    { label: 'Anti-Spoof', status: 'idle' },
+    { label: 'Face Recognition', status: 'idle' },
+  ]);
   const { addRecord } = useAttendanceStore();
 
   const { hasPermission, requestPermission } = useCameraPermission();
   const device = useCameraDevice('front');
+  const isFocused = useIsFocused();
+  const [appActive, setAppActive] = useState(AppState.currentState === 'active');
 
   const [isReady, setIsReady] = useState(false);
+
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (state) => {
+      setAppActive(state === 'active');
+    });
+    return () => sub.remove();
+  }, []);
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -71,6 +89,42 @@ export const AttendanceVerificationScreen: React.FC<Props> = ({ navigation }) =>
         result.matchedUserId
       );
 
+      let spoofStatus = 'idle';
+      if (result.spoofScore !== undefined) {
+        if (result.status === 'REJECT' && result.reason?.includes('Spoof')) {
+          spoofStatus = 'error';
+        } else if (result.isLive === true) {
+          spoofStatus = 'ok';
+        } else if (result.isLive === false) {
+          spoofStatus = 'error';
+        } else {
+          spoofStatus = 'warn'; // Analyzing/Voting
+        }
+      }
+
+      let livenessStatus = 'idle';
+      if (result.liveness?.livenessPass || result.blinkDetected || result.smileDetected || result.headTurnDetected) {
+        livenessStatus = 'ok';
+      } else if (scanStatus === 'scanning') {
+        livenessStatus = 'warn';
+      }
+
+      let recogStatus = 'idle';
+      if (result.matchedUserId !== undefined) {
+        recogStatus = 'ok';
+      } else if (result.status === 'REJECT' && result.reason?.includes('recognized')) {
+        recogStatus = 'error';
+      }
+
+      // Update indicators
+      setIndicators([
+        { label: 'Face Detect', status: result.faceDetected ? 'ok' : 'error' },
+        { label: 'Quality & Lighting', status: result.qualityPassed ? 'ok' : 'error' },
+        { label: 'Liveness (Blink/Smile)', status: livenessStatus },
+        { label: 'Anti-Spoof', status: spoofStatus },
+        { label: 'Face Recognition', status: recogStatus },
+      ]);
+
       if (result.status === 'RETRY') {
         if (result.reason) setFeedbackMsg(result.reason);
       }
@@ -81,7 +135,6 @@ export const AttendanceVerificationScreen: React.FC<Props> = ({ navigation }) =>
       if (result.status === 'REJECT') {
         setScanStatus('idle');
         setFeedbackMsg(result.reason || 'Verification Failed');
-        Alert.alert('Verification Failed', result.reason);
       }
     },
   });
@@ -116,7 +169,7 @@ export const AttendanceVerificationScreen: React.FC<Props> = ({ navigation }) =>
           <Camera
             style={StyleSheet.absoluteFill}
             device={device}
-            isActive={isCameraScanning}
+            isActive={isFocused && appActive}
             frameProcessor={isCameraScanning ? frameProcessor : undefined}
             pixelFormat="yuv"
           />
@@ -154,6 +207,34 @@ export const AttendanceVerificationScreen: React.FC<Props> = ({ navigation }) =>
           <View style={styles.livenessContainer}>
             <Text style={styles.panelTitle}>AI Analysis</Text>
             
+            <View style={styles.checksContainer}>
+              {indicators.map((ind, i) => {
+                let icon = '⚪';
+                let textColor = colors.textSecondary;
+                let activeStyle = {};
+                
+                if (ind.status === 'ok') {
+                  icon = '🟢';
+                  activeStyle = styles.checkTextActive;
+                } else if (ind.status === 'warn') {
+                  icon = '🟠';
+                  activeStyle = { color: colors.warning, fontWeight: '600' as const };
+                } else if (ind.status === 'error') {
+                  icon = '🔴';
+                  activeStyle = { color: colors.error, fontWeight: '600' as const };
+                }
+
+                return (
+                  <View key={i} style={styles.checkRow}>
+                    <Text style={styles.checkIcon}>{icon}</Text>
+                    <Text style={[styles.checkText, activeStyle]}>
+                      {ind.label}
+                    </Text>
+                  </View>
+                );
+              })}
+            </View>
+
             <View style={styles.feedbackBox}>
               <Text style={styles.feedbackText}>{feedbackMsg}</Text>
             </View>

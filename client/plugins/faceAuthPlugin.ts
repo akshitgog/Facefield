@@ -54,6 +54,9 @@ export type FaceAuthResult = {
   recognitionScore?: number | null;
   embedding?: number[];
   faceBase64?: string;
+  liveness?: {
+    livenessPass: boolean;
+  };
 };
 
 type UseFaceAuthOptions = {
@@ -64,7 +67,7 @@ type UseFaceAuthOptions = {
 
 import { runAsync } from 'react-native-vision-camera';
 
-export function useFaceAuth({ mode, onResult, throttleMs = 200 }: UseFaceAuthOptions) {
+export function useFaceAuth({ mode, onResult, throttleMs = 60 }: UseFaceAuthOptions) {
   const lastRunTime = useSharedValue(0);
   const isProcessing = useSharedValue(false);
 

@@ -116,6 +116,7 @@ class FaceAuthFrameProcessorPlugin(
         android.util.Log.d("FaceAuth", "FACE_DETECTED x=${faceBox?.x} y=${faceBox?.y} w=${faceBox?.width} h=${faceBox?.height}")
 
         if (faceBox == null) {
+            android.util.Log.d("FaceAuth", "QUALITY_FAIL: NO FACE DETECTED")
             missingFaceCount++
             if (missingFaceCount > 3) {
                 orchestrator.resetSession()
@@ -252,12 +253,22 @@ class FaceAuthFrameProcessorPlugin(
         // PULL DIRECTLY FROM NATIVE SQLITE (Lightning fast!)
         val storedEmbeddings = dbHelper.getAllEmbeddings()
         
-        val qualityReason = if (!brightnessOk) "Too dark or too bright. Adjust lighting."
-                            else if (!sharpnessOk) "Hold still to focus."
-                            else if (!isStraight) "Look straight at the camera."
-                            else ""
+        val qualityReason = if (!brightnessOk) {
+            val lightStatus = if (brightness255 < 50f) "TOO DARK" else "TOO BRIGHT"
+            android.util.Log.d("FaceAuth", "QUALITY_FAIL: $lightStatus (val=$brightness255)")
+            "Too dark or too bright. Adjust lighting."
+        } else if (!sharpnessOk) {
+            android.util.Log.d("FaceAuth", "QUALITY_FAIL: BLURRY / LOW SHARPNESS (val=${qualityResult.sharpnessScore})")
+            "Hold still to focus."
+        } else if (!isStraight) {
+            android.util.Log.d("FaceAuth", "QUALITY_FAIL: TILTED HEAD (roll=$rollAngle)")
+            "Look straight at the camera."
+        } else {
+            ""
+        }
 
-        return orchestrator.verifyAttendance(
+        val startRecognitionTime = System.currentTimeMillis()
+        val result = orchestrator.verifyAttendance(
             bitmap = bitmap,
             faceBox = faceBox,
             faceMeshLandmarks = landmarks,
@@ -265,6 +276,9 @@ class FaceAuthFrameProcessorPlugin(
             qualityPassed = qualityPassed,
             qualityReason = qualityReason
         )
+        val endRecognitionTime = System.currentTimeMillis()
+        android.util.Log.d("FaceAuth", "PIPELINE_TIMING Orchestrator took ${endRecognitionTime - startRecognitionTime} ms")
+        return result
     }
 
     private fun frameToBitmap(frame: Frame): Bitmap? {

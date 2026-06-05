@@ -53,6 +53,8 @@ class FaceAuthOrchestrator(context: Context) {
         livenessReasonCache = ""
     }
 
+    private var debugFrameCount = 0
+
     /**
      * Runs the full attendance verification pipeline with parallel liveness.
      *
@@ -73,6 +75,8 @@ class FaceAuthOrchestrator(context: Context) {
         qualityPassed: Boolean = true,
         qualityReason: String? = null
     ): Map<String, Any?> {
+        debugFrameCount++
+        android.util.Log.d("FaceAuth", "FRAME_COUNT_DEBUG processing frame $debugFrameCount")
 
         // ============================================================
         // STEP 0: Active Liveness (Pure Math)
@@ -89,7 +93,7 @@ class FaceAuthOrchestrator(context: Context) {
         if (liveness.livenessPass) {
             sessionLivenessPassed = true
         }
-        android.util.Log.d("FaceAuth", "LIVENESS_DEBUG pass=${liveness.livenessPass} blink=${liveness.blinkDetected} smile=${liveness.smileDetected} turn=${liveness.headTurnDetected}")
+        android.util.Log.d("FaceAuth", "LIVENESS_DEBUG pass=${liveness.livenessPass} blink=${liveness.blinkDetected}(L:${liveness.leftEyeAspectRatio} R:${liveness.rightEyeAspectRatio}) smile=${liveness.smileDetected}(w=${liveness.smileWidthRatio}) turn=${liveness.headTurnDetected}(off=${liveness.headTurnOffset})")
 
         // ============================================================
         // STEP 1: Face Quality Check
@@ -161,7 +165,7 @@ class FaceAuthOrchestrator(context: Context) {
         if (!sessionLivenessPassed) {
             return buildResult(
                 status = "RETRY",
-                reason = "Please blink, smile, or turn your head slightly.",
+                reason = "Please blink, smile, or shake your head.",
                 isLive = true,
                 liveScore = lastLiveScore,
                 spoofScore = lastSpoofScore,

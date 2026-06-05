@@ -25,9 +25,9 @@ object ActiveLivenessEngine {
     private val MOUTH_VERTICAL = intArrayOf(13, 14)
     private const val NOSE_TIP = 1
 
-    // Exact thresholds from quality.py (lines 17-19)
+    // Relaxed thresholds (adjusted to prevent false positives)
     private const val BLINK_EAR_THRESHOLD = 0.20f
-    private const val SMILE_WIDTH_RATIO_THRESHOLD = 0.42f
+    private const val SMILE_WIDTH_RATIO_THRESHOLD = 0.43f
     private const val HEAD_TURN_OFFSET_THRESHOLD = 0.16f
 
     /**

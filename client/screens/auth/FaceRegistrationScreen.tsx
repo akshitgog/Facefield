@@ -8,8 +8,10 @@ import {
   Dimensions,
   ScrollView,
   Image,
+  AppState,
 } from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
+import { useIsFocused } from '@react-navigation/native';
 import { Button, SafeAreaWrapper } from '../../components';
 import { colors, spacing, typography, radius, fs } from '../../theme';
 import { useUserStore } from '../../store';
@@ -39,8 +41,17 @@ export const FaceRegistrationScreen: React.FC<Props> = ({ navigation }) => {
   const { setFaceRegistered, user, isLoggedIn, registerUser } = useUserStore();
   const { hasPermission, requestPermission } = useCameraPermission();
   const device = useCameraDevice('front');
+  const isFocused = useIsFocused();
+  const [appActive, setAppActive] = useState(AppState.currentState === 'active');
 
   const [isReady, setIsReady] = useState(false);
+
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (state) => {
+      setAppActive(state === 'active');
+    });
+    return () => sub.remove();
+  }, []);
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -183,7 +194,7 @@ export const FaceRegistrationScreen: React.FC<Props> = ({ navigation }) => {
               ref={cameraRef}
               style={StyleSheet.absoluteFill}
               device={device}
-              isActive={true}
+              isActive={isFocused && appActive}
               photo={true}
               frameProcessor={phase === 'camera' ? frameProcessor : undefined}
               pixelFormat="yuv"
