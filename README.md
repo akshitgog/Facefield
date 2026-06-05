@@ -1,5 +1,6 @@
 # Datalake 3.0 - Offline Facial Recognition & Liveness Detection
 
+*Co-developed by [@KurianJose7586](https://github.com/KurianJose7586)*
 This project was developed for the Hackathon to provide a highly accurate, lightweight, and entirely offline facial recognition attendance system for remote locations.
 
 > [!WARNING]
