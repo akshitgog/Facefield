@@ -5,7 +5,7 @@ This project was developed for the Hackathon to provide a highly accurate, light
 
 > [!WARNING]
 > **Judges Testing Disclaimer (MVP Notice):**
-> 1. To install, download `app-release.apk` and install it via your Android **File Manager**.
+> 1. To install, download `app-release.apk` from the **GitHub Releases** section (on the right side of this page) and install it via your Android **File Manager**.
 > 2. Close the app, then go back to the File Manager and install it **one more time** (click "Update").
 > 3. Open the app and fill in your signup details.
 > 4. When clicking to scan your face, the app may close/crash once. This is just a one-time MVP memory allocation error!
