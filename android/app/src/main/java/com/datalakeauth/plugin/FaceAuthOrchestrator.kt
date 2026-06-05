@@ -34,6 +34,25 @@ class FaceAuthOrchestrator(context: Context) {
     private val faceNetEngine = FaceNetEngine(context)
     private val registrationEngine = RegistrationEngine(context)
 
+    // State for Session-based Spoofing (3-frame majority vote)
+    private var spoofVoteCount = 0
+    private var spoofLiveVotes = 0
+    private var sessionSpoofPassed = false
+    private var lastLiveScore = 0f
+    private var lastSpoofScore = 0f
+    
+    // State for Session-based Liveness (pass once per session)
+    private var sessionLivenessPassed = false
+    private var livenessReasonCache: String = ""
+
+    fun resetSession() {
+        spoofVoteCount = 0
+        spoofLiveVotes = 0
+        sessionSpoofPassed = false
+        sessionLivenessPassed = false
+        livenessReasonCache = ""
+    }
+
     /**
      * Runs the full attendance verification pipeline with parallel liveness.
      *
@@ -41,7 +60,7 @@ class FaceAuthOrchestrator(context: Context) {
      * @param faceBox             The detected face bounding box
      * @param faceMeshLandmarks   The 468 MediaPipe FaceMesh landmarks (pixel coords)
      * @param storedEmbeddings    The user's stored embeddings from SQLite
-     * @param similarityThreshold Cosine similarity threshold for match (default 0.4)
+     * @param similarityThreshold Cosine similarity threshold for match (default 0.70)
      *
      * @return A Map<String, Any?> serialized to JSON for React Native
      */
@@ -50,13 +69,30 @@ class FaceAuthOrchestrator(context: Context) {
         faceBox: FaceBox,
         faceMeshLandmarks: List<LandmarkPoint>,
         storedEmbeddings: Map<String, FloatArray>,
-        similarityThreshold: Float = 0.70f, // INCREASED to 0.70f (0.4f is too low and matches almost anyone)
+        similarityThreshold: Float = 0.70f,
         qualityPassed: Boolean = true,
         qualityReason: String? = null
     ): Map<String, Any?> {
 
         // ============================================================
-        // STEP 0: Face Quality Check
+        // STEP 0: Active Liveness (Pure Math)
+        // Runs immediately on EVERY frame to track blinks (even blurry ones!)
+        // ============================================================
+        val liveness = ActiveLivenessEngine.evaluate(
+            landmarks = faceMeshLandmarks,
+            faceBoxX = faceBox.x,
+            faceBoxY = faceBox.y,
+            faceBoxW = faceBox.width,
+            faceBoxH = faceBox.height
+        )
+        
+        if (liveness.livenessPass) {
+            sessionLivenessPassed = true
+        }
+        android.util.Log.d("FaceAuth", "LIVENESS_DEBUG pass=${liveness.livenessPass} blink=${liveness.blinkDetected} smile=${liveness.smileDetected} turn=${liveness.headTurnDetected}")
+
+        // ============================================================
+        // STEP 1: Face Quality Check
         // ============================================================
         if (!qualityPassed) {
             return buildResult(
@@ -66,51 +102,69 @@ class FaceAuthOrchestrator(context: Context) {
                 liveScore = null,
                 spoofScore = null,
                 qualityPassed = false,
-                liveness = null
-            )
-        }
-
-        // ============================================================
-        // STEP 1: Active Liveness (Pure Math, very fast)
-        // ============================================================
-        val liveness = ActiveLivenessEngine.evaluate(
-            landmarks = faceMeshLandmarks,
-            faceBoxX = faceBox.x,
-            faceBoxY = faceBox.y,
-            faceBoxW = faceBox.width,
-            faceBoxH = faceBox.height
-        )
-
-        // Active liveness not yet triggered → RETRY (user hasn't blinked/smiled/turned)
-        if (!liveness.livenessPass) {
-            android.util.Log.d("FaceAuth", "LIVENESS_DEBUG failed. blink=${liveness.blinkDetected} smile=${liveness.smileDetected} turn=${liveness.headTurnDetected}")
-            return buildResult(
-                status = "RETRY",
-                reason = "Please blink, smile, or turn your head slightly.",
-                isLive = null,
-                liveScore = null,
-                spoofScore = null,
-                qualityPassed = true,
-                liveness = liveness
+                liveness = liveness // Pass updated state back so UI still updates!
             )
         }
 
         // ============================================================
         // STEP 2: SilentFace Anti-Spoof (TFLite Inference)
-        // Runs ONLY after liveness passes, saving massive battery.
+        // Runs ONLY on up to 3 quality frames to make a majority vote.
         // ============================================================
-        val spoofResult = silentFaceEngine.verify(bitmap, faceBox)
-        
-        android.util.Log.d("FaceAuth", "SPOOF_DEBUG isLive=${spoofResult.isLive} liveScore=${spoofResult.liveScore} spoofScore=${spoofResult.spoofScore}")
+        if (!sessionSpoofPassed) {
+            val spoofResult = silentFaceEngine.verify(bitmap, faceBox)
+            android.util.Log.d("FaceAuth", "SPOOF_DEBUG isLive=${spoofResult.isLive} liveScore=${spoofResult.liveScore} spoofScore=${spoofResult.spoofScore}")
+            
+            spoofVoteCount++
+            lastLiveScore = spoofResult.liveScore
+            lastSpoofScore = spoofResult.spoofScore
+            
+            if (spoofResult.isLive) {
+                spoofLiveVotes++
+            }
+            
+            // Wait until we have 3 votes
+            if (spoofVoteCount < 3) {
+                return buildResult(
+                    status = "RETRY",
+                    reason = "Analyzing face... Please hold still.",
+                    isLive = null,
+                    liveScore = lastLiveScore,
+                    spoofScore = lastSpoofScore,
+                    qualityPassed = true,
+                    liveness = liveness
+                )
+            }
+            
+            // We have 3 votes. Check majority (>= 2)
+            if (spoofLiveVotes >= 2) {
+                sessionSpoofPassed = true
+                android.util.Log.d("FaceAuth", "SPOOF_VOTE_PASSED $spoofLiveVotes/3 votes")
+            } else {
+                // Failed majority vote. Reset and reject.
+                android.util.Log.d("FaceAuth", "SPOOF_VOTE_FAILED $spoofLiveVotes/3 votes")
+                val finalLiveScore = lastLiveScore
+                val finalSpoofScore = lastSpoofScore
+                resetSession() // Reset to try again
+                return buildResult(
+                    status = "REJECT",
+                    reason = "Spoof detected. This does not appear to be a live face.",
+                    isLive = false,
+                    liveScore = finalLiveScore,
+                    spoofScore = finalSpoofScore,
+                    qualityPassed = true,
+                    liveness = liveness
+                )
+            }
+        }
 
-        // Spoof detected → RETRY instead of immediate REJECT to allow continuous scanning
-        if (!spoofResult.isLive) {
+        // Gate: If no blink/smile yet in this session, ask for it
+        if (!sessionLivenessPassed) {
             return buildResult(
                 status = "RETRY",
-                reason = "Spoof detected. This does not appear to be a live face.",
-                isLive = false,
-                liveScore = spoofResult.liveScore,
-                spoofScore = spoofResult.spoofScore,
+                reason = "Please blink, smile, or turn your head slightly.",
+                isLive = true,
+                liveScore = lastLiveScore,
+                spoofScore = lastSpoofScore,
                 qualityPassed = true,
                 liveness = liveness
             )
@@ -130,8 +184,8 @@ class FaceAuthOrchestrator(context: Context) {
                 status = "REJECT",
                 reason = "Face not recognized. No matching user found.",
                 isLive = true,
-                liveScore = spoofResult.liveScore,
-                spoofScore = spoofResult.spoofScore,
+                liveScore = lastLiveScore,
+                spoofScore = lastSpoofScore,
                 qualityPassed = true,
                 liveness = liveness,
                 matchedUserId = null,
@@ -146,8 +200,8 @@ class FaceAuthOrchestrator(context: Context) {
             status = "ACCEPT",
             reason = "Attendance verified successfully.",
             isLive = true,
-            liveScore = spoofResult.liveScore,
-            spoofScore = spoofResult.spoofScore,
+            liveScore = lastLiveScore,
+            spoofScore = lastSpoofScore,
             qualityPassed = true,
             liveness = liveness,
             matchedUserId = matchResult.matchedUserId,

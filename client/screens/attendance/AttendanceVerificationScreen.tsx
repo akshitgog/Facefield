@@ -22,8 +22,7 @@ type Props = NativeStackScreenProps<RootStackParamList, 'AttendanceVerification'
 export const AttendanceVerificationScreen: React.FC<Props> = ({ navigation }) => {
   const [verifying, setVerifying] = useState(false);
   const [scanStatus, setScanStatus] = useState<'idle' | 'scanning' | 'verifying' | 'done'>('idle');
-  const [spoofPassed, setSpoofPassed] = useState(false);
-  const [activePassed, setActivePassed] = useState(false);
+  const [feedbackMsg, setFeedbackMsg] = useState('Position your face in the oval.');
   const { addRecord } = useAttendanceStore();
 
   const { hasPermission, requestPermission } = useCameraPermission();
@@ -44,29 +43,44 @@ export const AttendanceVerificationScreen: React.FC<Props> = ({ navigation }) =>
     }
   }, [hasPermission, requestPermission]);
 
+  useEffect(() => {
+    let timeoutId: NodeJS.Timeout;
+    if (scanStatus === 'scanning') {
+      timeoutId = setTimeout(() => {
+        setScanStatus('idle');
+        setFeedbackMsg('Scan timed out. Please try again.');
+        Alert.alert(
+          'Timeout',
+          'Verification took too long. Please ensure good lighting, look straight, and follow on-screen prompts.'
+        );
+      }, 15000); // 15 seconds timeout
+    }
+    return () => clearTimeout(timeoutId);
+  }, [scanStatus]);
+
   const { frameProcessor } = useFaceAuth({
     mode: 'attendance',
     onResult: (result: FaceAuthResult) => {
       // Only process if we are actively scanning
       if (scanStatus !== 'scanning') return;
 
+      console.log(
+        result.status,
+        result.reason,
+        result.recognitionScore,
+        result.matchedUserId
+      );
+
       if (result.status === 'RETRY') {
-        if (result.isLive) setSpoofPassed(true);
-        if (result.blinkDetected || result.smileDetected || result.headTurnDetected) setActivePassed(true);
+        if (result.reason) setFeedbackMsg(result.reason);
       }
       if (result.status === 'ACCEPT') {
-        setSpoofPassed(true);
-        setActivePassed(true);
+        setFeedbackMsg('Face verified successfully!');
         handleVerified(result.matchedUserId ?? 'unknown');
       }
       if (result.status === 'REJECT') {
-        if (!result.isLive) {
-          setSpoofPassed(false);
-        } else {
-          setSpoofPassed(true);
-          setActivePassed(true);
-        }
         setScanStatus('idle');
+        setFeedbackMsg(result.reason || 'Verification Failed');
         Alert.alert('Verification Failed', result.reason);
       }
     },
@@ -138,23 +152,14 @@ export const AttendanceVerificationScreen: React.FC<Props> = ({ navigation }) =>
           </View>
         ) : scanStatus === 'scanning' ? (
           <View style={styles.livenessContainer}>
-            <Text style={styles.panelTitle}>Active Liveness</Text>
-            <View style={styles.checksContainer}>
-              <View style={styles.checkRow}>
-                <Text style={styles.checkIcon}>{activePassed ? '🟢' : '◯'}</Text>
-                <Text style={[styles.checkText, activePassed && styles.checkTextActive]}>
-                  Blink, smile, or turn head
-                </Text>
-              </View>
-              <View style={styles.checkRow}>
-                <Text style={styles.checkIcon}>{spoofPassed ? '🟢' : '◯'}</Text>
-                <Text style={[styles.checkText, spoofPassed && styles.checkTextActive]}>
-                  Real face detected (No spoof)
-                </Text>
-              </View>
+            <Text style={styles.panelTitle}>AI Analysis</Text>
+            
+            <View style={styles.feedbackBox}>
+              <Text style={styles.feedbackText}>{feedbackMsg}</Text>
             </View>
+
             <View style={styles.scanningBadge}>
-              <Text style={styles.scanningText}>⚡ Scanning Face...</Text>
+              <Text style={styles.scanningText}>⚡ Live Scanning...</Text>
             </View>
           </View>
         ) : (

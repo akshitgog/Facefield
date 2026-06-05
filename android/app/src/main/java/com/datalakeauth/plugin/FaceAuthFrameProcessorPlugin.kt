@@ -71,6 +71,7 @@ class FaceAuthFrameProcessorPlugin(
     }
 
     private val dbHelper by lazy { EmbeddingDatabaseHelper(context) }
+    private var missingFaceCount = 0
 
     /**
      * Called by react-native-vision-camera for every frame.
@@ -115,12 +116,19 @@ class FaceAuthFrameProcessorPlugin(
         android.util.Log.d("FaceAuth", "FACE_DETECTED x=${faceBox?.x} y=${faceBox?.y} w=${faceBox?.width} h=${faceBox?.height}")
 
         if (faceBox == null) {
+            missingFaceCount++
+            if (missingFaceCount > 3) {
+                orchestrator.resetSession()
+            }
             return mapOf(
                 "status" to "RETRY",
                 "reason" to "No face detected.",
                 "faceDetected" to false
             )
         }
+        
+        // Face found, reset the counter
+        missingFaceCount = 0
 
         // ----------------------------------------------------------
         // 3. Run MediaPipe FaceMesh → 468 Landmarks
@@ -243,7 +251,11 @@ class FaceAuthFrameProcessorPlugin(
         
         // PULL DIRECTLY FROM NATIVE SQLITE (Lightning fast!)
         val storedEmbeddings = dbHelper.getAllEmbeddings()
-        val qualityReason = "" // Silent, no annoying popup messages
+        
+        val qualityReason = if (!brightnessOk) "Too dark or too bright. Adjust lighting."
+                            else if (!sharpnessOk) "Hold still to focus."
+                            else if (!isStraight) "Look straight at the camera."
+                            else ""
 
         return orchestrator.verifyAttendance(
             bitmap = bitmap,
@@ -260,13 +272,17 @@ class FaceAuthFrameProcessorPlugin(
             val image = frame.getImage() ?: return null
             val rawBmp = YuvToRgbConverter.imageToBitmap(image) ?: return null
             
-            // Dynamically calculate rotation based on the frame's Orientation enum
-            val rotationDegrees = frame.orientation.toDegrees().toFloat()
-            
             val matrix = android.graphics.Matrix()
-            matrix.postRotate(rotationDegrees)
             
-            // Dynamically mirror the image if the frame says it is mirrored (front cameras)
+            // Camera sensors are natively landscape. 
+            // If the raw buffer is landscape, we must rotate it to match the phone's Portrait UI.
+            if (rawBmp.width > rawBmp.height) {
+                // Front cameras usually need 270 degrees, back cameras 90 degrees
+                val sensorRotation = if (frame.isMirrored) 270f else 90f
+                matrix.postRotate(sensorRotation)
+            }
+            
+            // Mirroring the image if it's a front camera
             if (frame.isMirrored) {
                 matrix.postScale(-1f, 1f)
             }

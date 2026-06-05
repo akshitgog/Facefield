@@ -64,7 +64,7 @@ export const ProfileScreen: React.FC<Props> = ({ navigation }) => {
         <SectionCard title="Personal Details">
           <DetailRow label="Phone" value={user?.phone || '—'} />
           <DetailRow label="Age" value={String(user?.age ?? '—')} />
-          <DetailRow label="Address" value={user?.address ?? '—'} />
+          <DetailRow label="Address" value={user?.address ?? '—'} />
           <DetailRow label="Disability" value={user?.disability || 'None'} last />
         </SectionCard>
 

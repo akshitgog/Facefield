@@ -20,8 +20,8 @@
 import { VisionCameraProxy, Frame, useFrameProcessor, FrameProcessorPlugin } from 'react-native-vision-camera';
 import { useSharedValue, Worklets } from 'react-native-worklets-core';
 
-// Register the native plugin
-let plugin: FrameProcessorPlugin | undefined;
+// Register the native plugin once on the JS thread
+const plugin = VisionCameraProxy.initFrameProcessorPlugin('faceAuth', {});
 
 /**
  * Calls the native faceAuth plugin on a single frame.
@@ -29,10 +29,7 @@ let plugin: FrameProcessorPlugin | undefined;
 export function faceAuth(frame: Frame, params?: Record<string, unknown>): FaceAuthResult {
   'worklet';
   if (plugin == null) {
-    plugin = VisionCameraProxy.initFrameProcessorPlugin('faceAuth', {});
-  }
-  if (plugin == null) {
-    throw new Error('faceAuth plugin not found.');
+    throw new Error('faceAuth plugin not found. Did you forget to add the package?');
   }
   return plugin.call(frame, params as any) as unknown as FaceAuthResult;
 }
@@ -67,7 +64,7 @@ type UseFaceAuthOptions = {
 
 import { runAsync } from 'react-native-vision-camera';
 
-export function useFaceAuth({ mode, onResult, throttleMs = 500 }: UseFaceAuthOptions) {
+export function useFaceAuth({ mode, onResult, throttleMs = 200 }: UseFaceAuthOptions) {
   const lastRunTime = useSharedValue(0);
   const isProcessing = useSharedValue(false);
 
@@ -89,9 +86,7 @@ export function useFaceAuth({ mode, onResult, throttleMs = 500 }: UseFaceAuthOpt
         try {
           const result = faceAuth(frame, { mode });
 
-          if (result.status !== 'RETRY' || result.faceDetected) {
-            runOnJSResult(result);
-          }
+          runOnJSResult(result);
         } finally {
           isProcessing.value = false;
         }

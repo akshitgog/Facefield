@@ -55,6 +55,20 @@ export const FaceRegistrationScreen: React.FC<Props> = ({ navigation }) => {
     }
   }, [hasPermission, requestPermission]);
 
+  useEffect(() => {
+    let timeoutId: NodeJS.Timeout;
+    if (phase === 'camera') {
+      timeoutId = setTimeout(() => {
+        setPhase('idle');
+        Alert.alert(
+          'Timeout',
+          'Registration took too long. Please ensure good lighting, look straight, and hold still.'
+        );
+      }, 15000); // 15 seconds timeout
+    }
+    return () => clearTimeout(timeoutId);
+  }, [phase]);
+
   const { frameProcessor } = useFaceAuth({
     mode: 'registration',
     onResult: async (result: FaceAuthResult) => {
