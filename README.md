@@ -2,6 +2,12 @@
 
 This project was developed for the Hackathon to provide a highly accurate, lightweight, and entirely offline facial recognition attendance system for remote locations.
 
+> [!WARNING]
+> **Judges Testing Disclaimer:**
+> 1. To install the app, download `app-release.apk` and open it via your Android **File Manager** to install.
+> 2. On your very first attempt to **Signup / Scan Photo**, the application *may* crash once due to a one-time memory allocation spike.
+> 3. **This is expected on the first run.** Simply reopen the app, run the signup/scan again, and it will work perfectly and smoothly from then on!
+
 ## 🚀 Key Achievements
 - **Offline First**: Works with zero network connectivity. Uses local SQLite and AsyncStorage.
 - **Micro AI Footprint**: Achieved an AI model footprint of just **6.04 MB** using Dynamic Range Quantization (DRQ), successfully beating the 20 MB requirement.
