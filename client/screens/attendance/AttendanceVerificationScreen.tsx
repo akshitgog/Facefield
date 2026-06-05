@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -38,6 +38,7 @@ export const AttendanceVerificationScreen: React.FC<Props> = ({ navigation }) =>
   const device = useCameraDevice('front');
   const isFocused = useIsFocused();
   const [appActive, setAppActive] = useState(AppState.currentState === 'active');
+  const lastFaceSeenTime = useRef<number>(Date.now());
 
   const [isReady, setIsReady] = useState(false);
 
@@ -80,7 +81,21 @@ export const AttendanceVerificationScreen: React.FC<Props> = ({ navigation }) =>
     mode: 'attendance',
     onResult: (result: FaceAuthResult) => {
       // Only process if we are actively scanning
-      if (scanStatus !== 'scanning') return;
+      if (scanStatus !== 'scanning') {
+        lastFaceSeenTime.current = Date.now();
+        return;
+      }
+
+      if (result.faceDetected) {
+        lastFaceSeenTime.current = Date.now();
+      } else {
+        if (Date.now() - lastFaceSeenTime.current > 4000) {
+          setScanStatus('idle');
+          setFeedbackMsg('No face detected.');
+          Alert.alert('Timeout', 'No face detected for 4 seconds. Please ensure your face is inside the oval.');
+          return;
+        }
+      }
 
       console.log(
         result.status,
@@ -121,7 +136,7 @@ export const AttendanceVerificationScreen: React.FC<Props> = ({ navigation }) =>
         { label: 'Face Detect', status: result.faceDetected ? 'ok' : 'error' },
         { label: 'Quality & Lighting', status: result.qualityPassed ? 'ok' : 'error' },
         { label: 'Liveness (Blink/Smile)', status: livenessStatus },
-        { label: 'Anti-Spoof', status: spoofStatus },
+        { label: 'Spoof Check', status: spoofStatus },
         { label: 'Face Recognition', status: recogStatus },
       ]);
 
@@ -129,12 +144,26 @@ export const AttendanceVerificationScreen: React.FC<Props> = ({ navigation }) =>
         if (result.reason) setFeedbackMsg(result.reason);
       }
       if (result.status === 'ACCEPT') {
-        setFeedbackMsg('Face verified successfully!');
-        handleVerified(result.matchedUserId ?? 'unknown');
+        // Only run this once to prevent multiple redirects during the delay
+        if (scanStatus === 'scanning') {
+          setScanStatus('verifying');
+          setFeedbackMsg('Face verified successfully!');
+          setTimeout(() => {
+            handleVerified(result.matchedUserId ?? 'unknown');
+          }, 800);
+        }
       }
       if (result.status === 'REJECT') {
         setScanStatus('idle');
         setFeedbackMsg(result.reason || 'Verification Failed');
+        
+        let title = 'Verification Failed';
+        if (result.reason?.toLowerCase().includes('recognized')) {
+          title = 'Unknown Identity';
+        } else if (result.reason?.toLowerCase().includes('spoof')) {
+          title = 'Spoof Detected';
+        }
+        Alert.alert(title, result.reason || 'Please try again.');
       }
     },
   });
@@ -329,9 +358,9 @@ const styles = StyleSheet.create({
   panelSub: { ...typography.body, marginBottom: spacing.xl, textAlign: 'center' as const, color: colors.textSecondary },
   livenessContainer: { alignItems: 'center' as const, paddingTop: spacing.md },
   checksContainer: { width: '100%', paddingHorizontal: spacing.xl, marginBottom: spacing.lg, gap: 12 },
-  checkRow: { flexDirection: 'row', alignItems: 'center' as const, gap: 10 },
-  checkIcon: { fontSize: fs(18) },
-  checkText: { ...typography.body, color: colors.textSecondary },
+  checkRow: { flexDirection: 'row', alignItems: 'center' as const, gap: 12 },
+  checkIcon: { fontSize: fs(18), width: 24, textAlign: 'center' as const },
+  checkText: { ...typography.body, color: colors.textSecondary, flex: 1 },
   checkTextActive: { color: colors.success, fontWeight: '600' as const },
   scanningBadge: {
     backgroundColor: 'rgba(52, 199, 89, 0.15)',

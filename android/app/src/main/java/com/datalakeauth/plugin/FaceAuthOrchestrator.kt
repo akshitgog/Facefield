@@ -5,11 +5,10 @@ import android.graphics.Bitmap
 import com.datalakeauth.models.ActiveLivenessEngine
 import com.datalakeauth.models.ActiveLivenessEngine.LandmarkPoint
 import com.datalakeauth.models.FaceNetEngine
+import com.datalakeauth.models.ScreenSpoofDetector
 import com.datalakeauth.models.SilentFaceEngine
 import com.datalakeauth.preprocessing.ImageCropUtils.FaceBox
 import com.datalakeauth.registration.RegistrationEngine
-import kotlinx.coroutines.async
-import kotlinx.coroutines.runBlocking
 
 /**
  * The main orchestrator for the face authentication pipeline.
@@ -31,26 +30,38 @@ import kotlinx.coroutines.runBlocking
 class FaceAuthOrchestrator(context: Context) {
 
     private val silentFaceEngine = SilentFaceEngine(context)
+    private val screenSpoofDetector = ScreenSpoofDetector()
     private val faceNetEngine = FaceNetEngine(context)
     private val registrationEngine = RegistrationEngine(context)
 
-    // State for Session-based Spoofing (3-frame majority vote)
-    private var spoofVoteCount = 0
-    private var spoofLiveVotes = 0
+    // State for session-based spoofing (fused screen replay + SilentFace score window)
+    private val recentSilentSpoofScores = mutableListOf<Float>()
+    private val recentScreenScores = mutableListOf<Float>()
+    private val recentFusedSpoofScores = mutableListOf<Float>()
     private var sessionSpoofPassed = false
     private var lastLiveScore = 0f
     private var lastSpoofScore = 0f
+    private var lastScreenScore = 0f
+    private var lastFusedSpoofScore = 0f
+    private var consecutiveRecognitionFailures = 0
     
     // State for Session-based Liveness (pass once per session)
     private var sessionLivenessPassed = false
     private var livenessReasonCache: String = ""
 
     fun resetSession() {
-        spoofVoteCount = 0
-        spoofLiveVotes = 0
+        recentSilentSpoofScores.clear()
+        recentScreenScores.clear()
+        recentFusedSpoofScores.clear()
+        screenSpoofDetector.reset()
         sessionSpoofPassed = false
         sessionLivenessPassed = false
         livenessReasonCache = ""
+        lastLiveScore = 0f
+        lastSpoofScore = 0f
+        lastScreenScore = 0f
+        lastFusedSpoofScore = 0f
+        consecutiveRecognitionFailures = 0
     }
 
     private var debugFrameCount = 0
@@ -71,7 +82,7 @@ class FaceAuthOrchestrator(context: Context) {
         faceBox: FaceBox,
         faceMeshLandmarks: List<LandmarkPoint>,
         storedEmbeddings: Map<String, FloatArray>,
-        similarityThreshold: Float = 0.70f,
+        similarityThreshold: Float = 0.85f,
         qualityPassed: Boolean = true,
         qualityReason: String? = null
     ): Map<String, Any?> {
@@ -111,53 +122,98 @@ class FaceAuthOrchestrator(context: Context) {
         }
 
         // ============================================================
-        // STEP 2: SilentFace Anti-Spoof (TFLite Inference)
-        // Runs ONLY on up to 3 quality frames to make a majority vote.
+        // STEP 2: Passive Anti-Spoof
+        // Fuses a screen replay score with SilentFace spoof confidence over 10 quality frames.
         // ============================================================
         if (!sessionSpoofPassed) {
+            val screenResult = screenSpoofDetector.analyze(bitmap, faceBox)
             val spoofResult = silentFaceEngine.verify(bitmap, faceBox)
-            android.util.Log.d("FaceAuth", "SPOOF_DEBUG isLive=${spoofResult.isLive} liveScore=${spoofResult.liveScore} spoofScore=${spoofResult.spoofScore}")
-            
-            spoofVoteCount++
+
             lastLiveScore = spoofResult.liveScore
             lastSpoofScore = spoofResult.spoofScore
-            
-            if (spoofResult.isLive) {
-                spoofLiveVotes++
+            lastScreenScore = screenResult.screenScore
+            lastFusedSpoofScore = minOf(1.0f, spoofResult.spoofScore + (screenResult.screenScore * 0.35f))
+
+            android.util.Log.d(
+                "FaceAuth",
+                "SPOOF_FUSED_DEBUG isLive=${spoofResult.isLive} liveScore=${spoofResult.liveScore} " +
+                    "spoofScore=${spoofResult.spoofScore} screenScore=${screenResult.screenScore} " +
+                    "flicker=${screenResult.flickerScore} texture=${screenResult.textureScore} " +
+                    "fused=$lastFusedSpoofScore screenFrames=${screenResult.framesCollected} reason=${screenResult.reason}"
+            )
+
+            if (screenResult.screenScore >= HARD_SCREEN_SCORE_THRESHOLD ||
+                lastFusedSpoofScore >= HARD_FUSED_SPOOF_THRESHOLD
+            ) {
+                val finalLiveScore = lastLiveScore
+                val finalSpoofScore = lastFusedSpoofScore
+                val finalScreenScore = lastScreenScore
+                android.util.Log.d(
+                    "FaceAuth",
+                    "SPOOF_FUSED_HARD_REJECT screen=$lastScreenScore fused=$lastFusedSpoofScore"
+                )
+                resetSession()
+                return buildResult(
+                    status = "REJECT",
+                    reason = "Spoof detected. This may be a screen replay.",
+                    isLive = false,
+                    liveScore = finalLiveScore,
+                    spoofScore = finalSpoofScore,
+                    qualityPassed = true,
+                    liveness = liveness,
+                    screenScore = finalScreenScore,
+                    fusedSpoofScore = finalSpoofScore
+                )
             }
-            
-            // Wait until we have 3 votes
-            if (spoofVoteCount < 3) {
+
+            recentSilentSpoofScores.add(spoofResult.spoofScore)
+            recentScreenScores.add(screenResult.screenScore)
+            recentFusedSpoofScores.add(lastFusedSpoofScore)
+
+            if (recentFusedSpoofScores.size < SPOOF_SCORE_WINDOW) {
                 return buildResult(
                     status = "RETRY",
                     reason = "Analyzing face... Please hold still.",
                     isLive = null,
                     liveScore = lastLiveScore,
-                    spoofScore = lastSpoofScore,
+                    spoofScore = lastFusedSpoofScore,
                     qualityPassed = true,
-                    liveness = liveness
+                    liveness = liveness,
+                    screenScore = lastScreenScore,
+                    fusedSpoofScore = lastFusedSpoofScore
                 )
             }
-            
-            // We have 3 votes. Check majority (>= 2)
-            if (spoofLiveVotes >= 2) {
-                sessionSpoofPassed = true
-                android.util.Log.d("FaceAuth", "SPOOF_VOTE_PASSED $spoofLiveVotes/3 votes")
-            } else {
-                // Failed majority vote. Reset and reject.
-                android.util.Log.d("FaceAuth", "SPOOF_VOTE_FAILED $spoofLiveVotes/3 votes")
-                val finalLiveScore = lastLiveScore
-                val finalSpoofScore = lastSpoofScore
-                resetSession() // Reset to try again
+
+            val avgSilentSpoof = recentSilentSpoofScores.average().toFloat()
+            val avgScreenScore = recentScreenScores.average().toFloat()
+            val avgFusedSpoof = recentFusedSpoofScores.average().toFloat()
+
+            android.util.Log.d(
+                "FaceAuth",
+                "SPOOF_FUSED_AVG avgSilent=$avgSilentSpoof avgScreen=$avgScreenScore avgFused=$avgFusedSpoof"
+            )
+
+            if (avgFusedSpoof >= AVG_FUSED_SPOOF_THRESHOLD ||
+                (avgSilentSpoof > AVG_SILENT_SPOOF_THRESHOLD && avgScreenScore > AVG_SCREEN_SCORE_THRESHOLD)
+            ) {
+                resetSession()
                 return buildResult(
                     status = "REJECT",
-                    reason = "Spoof detected. This does not appear to be a live face.",
+                    reason = "Spoof detected. This may be a screen replay.",
                     isLive = false,
-                    liveScore = finalLiveScore,
-                    spoofScore = finalSpoofScore,
+                    liveScore = lastLiveScore,
+                    spoofScore = avgFusedSpoof,
                     qualityPassed = true,
-                    liveness = liveness
+                    liveness = liveness,
+                    screenScore = avgScreenScore,
+                    fusedSpoofScore = avgFusedSpoof
                 )
+            } else {
+                sessionSpoofPassed = true
+                lastSpoofScore = avgSilentSpoof
+                lastScreenScore = avgScreenScore
+                lastFusedSpoofScore = avgFusedSpoof
+                android.util.Log.d("FaceAuth", "SPOOF_FUSED_PASSED avgFused=$avgFusedSpoof")
             }
         }
 
@@ -170,7 +226,9 @@ class FaceAuthOrchestrator(context: Context) {
                 liveScore = lastLiveScore,
                 spoofScore = lastSpoofScore,
                 qualityPassed = true,
-                liveness = liveness
+                liveness = liveness,
+                screenScore = lastScreenScore,
+                fusedSpoofScore = lastFusedSpoofScore
             )
         }
 
@@ -184,22 +242,43 @@ class FaceAuthOrchestrator(context: Context) {
         android.util.Log.d("FaceAuth", "RECOGNITION_DEBUG matched=${matchResult.matched} score=${matchResult.recognitionScore} userId=${matchResult.matchedUserId}")
 
         if (!matchResult.matched) {
-            return buildResult(
-                status = "REJECT",
-                reason = "Face not recognized. No matching user found.",
-                isLive = true,
-                liveScore = lastLiveScore,
-                spoofScore = lastSpoofScore,
-                qualityPassed = true,
-                liveness = liveness,
-                matchedUserId = null,
-                recognitionScore = matchResult.recognitionScore
-            )
+            consecutiveRecognitionFailures++
+            if (consecutiveRecognitionFailures >= 5) {
+                resetSession()
+                return buildResult(
+                    status = "REJECT",
+                    reason = "Face not recognized. No matching user found.",
+                    isLive = true,
+                    liveScore = lastLiveScore,
+                    spoofScore = lastSpoofScore,
+                    qualityPassed = true,
+                    liveness = liveness,
+                    matchedUserId = null,
+                    recognitionScore = matchResult.recognitionScore,
+                    screenScore = lastScreenScore,
+                    fusedSpoofScore = lastFusedSpoofScore
+                )
+            } else {
+                return buildResult(
+                    status = "RETRY",
+                    reason = "",
+                    isLive = true,
+                    liveScore = lastLiveScore,
+                    spoofScore = lastSpoofScore,
+                    qualityPassed = true,
+                    liveness = liveness,
+                    matchedUserId = null,
+                    recognitionScore = matchResult.recognitionScore,
+                    screenScore = lastScreenScore,
+                    fusedSpoofScore = lastFusedSpoofScore
+                )
+            }
         }
 
         // ============================================================
         // STEP 4: SUCCESS — All checks passed
         // ============================================================
+        resetSession() // CRITICAL FIX: Reset state for the NEXT scan
         return buildResult(
             status = "ACCEPT",
             reason = "Attendance verified successfully.",
@@ -209,7 +288,9 @@ class FaceAuthOrchestrator(context: Context) {
             qualityPassed = true,
             liveness = liveness,
             matchedUserId = matchResult.matchedUserId,
-            recognitionScore = matchResult.recognitionScore
+            recognitionScore = matchResult.recognitionScore,
+            screenScore = lastScreenScore,
+            fusedSpoofScore = lastFusedSpoofScore
         )
     }
 
@@ -240,7 +321,9 @@ class FaceAuthOrchestrator(context: Context) {
         qualityPassed: Boolean,
         liveness: ActiveLivenessEngine.LivenessResult?,
         matchedUserId: String? = null,
-        recognitionScore: Float? = null
+        recognitionScore: Float? = null,
+        screenScore: Float? = null,
+        fusedSpoofScore: Float? = null
     ): Map<String, Any?> {
         return mapOf(
             "status" to status,
@@ -255,7 +338,18 @@ class FaceAuthOrchestrator(context: Context) {
             "smileDetected" to liveness?.smileDetected,
             "headTurnDetected" to liveness?.headTurnDetected,
             "matchedUserId" to matchedUserId,
-            "recognitionScore" to recognitionScore?.toDouble()
+            "recognitionScore" to recognitionScore?.toDouble(),
+            "screenScore" to screenScore?.toDouble(),
+            "fusedSpoofScore" to fusedSpoofScore?.toDouble()
         )
+    }
+
+    companion object {
+        private const val SPOOF_SCORE_WINDOW = 5
+        private const val HARD_SCREEN_SCORE_THRESHOLD = 0.85f
+        private const val HARD_FUSED_SPOOF_THRESHOLD = 0.85f // Was 0.45. Only hard reject on absolute certainty
+        private const val AVG_FUSED_SPOOF_THRESHOLD = 0.45f // Was 0.25. Average must be high to reject
+        private const val AVG_SILENT_SPOOF_THRESHOLD = 0.35f
+        private const val AVG_SCREEN_SCORE_THRESHOLD = 0.40f
     }
 }
