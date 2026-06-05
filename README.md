@@ -1,76 +1,37 @@
-# FieldAttend — Offline Facial Recognition Attendance App
+# Datalake 3.0 - Offline Facial Recognition & Liveness Detection
 
-## Setup
+This project was developed for the Hackathon to provide a highly accurate, lightweight, and entirely offline facial recognition attendance system for remote locations.
 
+## 🚀 Key Achievements
+- **Offline First**: Works with zero network connectivity. Uses local SQLite and AsyncStorage.
+- **Micro AI Footprint**: Achieved an AI model footprint of just **6.04 MB** using Dynamic Range Quantization (DRQ), successfully beating the 20 MB requirement.
+- **Zero-Latency Native Processing**: Bypassed the React Native bridge by implementing computer vision processing purely in C++ JSI and Kotlin `react-native-worklets-core`.
+- **Dual-Layer Liveness Detection**:
+  - **Passive Liveness**: 2 Neural Networks analyzing moiré patterns/textures to detect printed photos and digital screens.
+  - **Active Liveness**: Real-time 3D tracking of 468 facial landmarks to detect blinks, smiles, and head turns.
+
+## 📦 System Architecture
+1. **Frontend**: React Native, Zustand (State Management), React Navigation.
+2. **Camera API**: `react-native-vision-camera` (v4).
+3. **Native ML**: TensorFlow Lite C++ API, MediaPipe Tasks Vision.
+4. **Offline Database**: Android SQLite OpenHelper.
+
+## 🔧 Setup Instructions
+
+### 1. Install Dependencies
 ```bash
 npm install
-# iOS
-cd ios && pod install && cd ..
-npx react-native run-ios
+```
 
-# Android
+### 2. Run Android Application
+```bash
 npx react-native run-android
 ```
 
-## Architecture
+*(Note: The AI Models are bundled directly into the `android/app/src/main/assets/` directory.)*
 
-```
-App.tsx
-└── SafeAreaProvider
-    └── RootNavigator
-        ├── AuthStack (not logged in)
-        │   ├── LoginScreen
-        │   ├── SignupScreen
-        │   └── FaceRegistrationScreen
-        └── App (logged in)
-            ├── AppTabs (bottom tab)
-            │   ├── DashboardScreen
-            │   ├── HistoryScreen
-            │   └── ProfileScreen
-            ├── AttendanceVerificationScreen  (fullscreen modal)
-            └── AttendanceSuccessScreen       (modal)
-```
-
-## Key Integration Points
-
-### Vision Camera (Face Detection)
-Replace placeholder `<View style={styles.camera}>` in:
-- `FaceRegistrationScreen.tsx` — capture face embedding
-- `AttendanceVerificationScreen.tsx` — run liveness + recognition
-
-```tsx
-import { Camera, useCameraDevice, useFrameProcessor } from 'react-native-vision-camera';
-import { Face, useFaceDetector } from 'react-native-vision-camera-face-detector';
-
-const device = useCameraDevice('front');
-const { detectFaces } = useFaceDetector();
-
-const frameProcessor = useFrameProcessor((frame) => {
-  'worklet';
-  const faces = detectFaces(frame);
-  // Check: faces.length === 1, face.bounds, face.leftEyeOpenProbability, etc.
-}, []);
-```
-
-### Offline Storage
-- Attendance records: persisted via Zustand + AsyncStorage
-- Face embeddings: store as base64 via `react-native-fs` in app documents directory
-- Sync queue: implement background sync when network detected via `@react-native-community/netinfo`
-
-### Liveness Detection Sequence
-`AttendanceVerificationScreen` simulates the 3-step liveness check.
-Wire each step to Vision Camera frame processor outputs:
-1. Blink → `face.leftEyeOpenProbability < 0.15 && face.rightEyeOpenProbability < 0.15`
-2. Smile → `face.smilingProbability > 0.8`  
-3. Head turn → `Math.abs(face.yawAngle) > 25`
-
-## Design Tokens (src/theme/index.ts)
-| Token | Value |
-|-------|-------|
-| Primary | `#1A73E8` |
-| Success | `#1E8F4E` |
-| Error | `#D32F2F` |
-| Border radius (card) | `16px` |
-| Border radius (input) | `8px` |
-| Min touch target | `48×48px` |
-| Base font scale | `375px` viewport |
+## 📁 Repository Structure
+- `/client` - React Native UI, Navigation, and Zustand State.
+- `/android/app/src/main/java/com/datalakeauth` - Custom Kotlin/C++ Native modules for ML pipelines, Liveness, and Registration.
+- `/android/app/src/main/assets` - TFLite Models.
+- `AWS_INTEGRATION.md` - Documentation outlining the Sync & Purge mechanism.
