@@ -64,6 +64,7 @@ export const typography = {
   body: { fontSize: fs(15), fontWeight: '400' as const, color: colors.textPrimary },
   bodyBold: { fontSize: fs(15), fontWeight: '600' as const, color: colors.textPrimary },
   small: { fontSize: fs(13), fontWeight: '400' as const, color: colors.textSecondary },
+  smallBold: { fontSize: fs(13), fontWeight: '600' as const, color: colors.textPrimary },
   tiny: { fontSize: fs(11), fontWeight: '400' as const, color: colors.textHint },
   label: { fontSize: fs(13), fontWeight: '500' as const, color: colors.textSecondary },
 };

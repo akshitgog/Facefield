@@ -1,153 +1,156 @@
-/**
- * embeddingStorage.ts
- *
- * Local storage for face embeddings and attendance records using SQLite.
- *
- * In production, use react-native-sqlite-storage or expo-sqlite.
- * For the hackathon demo, we use AsyncStorage as a lightweight
- * JSON-based store that works offline without any native setup.
- */
-
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import { NativeModules } from 'react-native';
-
-// ─────────────────────────────────────────────────────
-// Types
-// ─────────────────────────────────────────────────────
+import { nativeFaceStorage, secureStorage } from './secureStorage';
+import { localDateKey } from './localDate';
+import type { User } from './index';
 
 export type StoredUser = {
   userId: string;
   name: string;
   email: string;
-  embedding: number[]; // L2-normalized average embedding
+  embedding: number[];
   faceImageUri?: string;
   registeredAt: string;
+  // Durable recovery snapshot committed in the same native transaction as the face.
+  account?: User;
 };
 
 export type AttendanceRecord = {
   id: string;
   userId: string;
   date: string;
-  entryTime: string;
+  entryTime?: string;
   exitTime?: string;
-  status: 'present' | 'absent';
+  status: 'present' | 'absent' | 'late';
   synced: boolean;
+  isPurged?: boolean;
 };
 
-// ─────────────────────────────────────────────────────
-// Embedding Storage (Registration)
-// ─────────────────────────────────────────────────────
-
 const EMBEDDINGS_KEY = '@datalake_embeddings';
+const ATTENDANCE_KEY = '@datalake_attendance';
+let enrollmentQueue: Promise<unknown> = Promise.resolve();
+let attendanceQueue: Promise<unknown> = Promise.resolve();
 
-/**
- * Stores a user's face embedding after registration.
- */
-export async function saveEmbedding(user: StoredUser): Promise<void> {
-  const existing = await getAllEmbeddings();
-  existing[user.userId] = user;
-  await AsyncStorage.setItem(EMBEDDINGS_KEY, JSON.stringify(existing));
-  
-  // Sync directly to Native SQLite for offline FaceAuth inference
-  if (NativeModules.FaceAuthSQLite) {
-    try {
-      NativeModules.FaceAuthSQLite.saveEmbedding(user.userId, Array.from(user.embedding));
-    } catch (e) {
-      console.log('Failed to sync embedding to Native SQLite', e);
-    }
-  }
-}
-
-/**
- * Retrieves all stored embeddings as a map of userId → StoredUser.
- */
-export async function getAllEmbeddings(): Promise<Record<string, StoredUser>> {
-  const raw = await AsyncStorage.getItem(EMBEDDINGS_KEY);
-  if (!raw) return {};
-  return JSON.parse(raw);
-}
-
-/**
- * Retrieves all embeddings as a flat map of userId → number[]
- * for passing to the native Kotlin pipeline.
- */
-export async function getEmbeddingsForNative(): Promise<Record<string, number[]>> {
-  const users = await getAllEmbeddings();
-  const result: Record<string, number[]> = {};
-  for (const [userId, user] of Object.entries(users)) {
-    result[userId] = user.embedding;
-  }
+function enrollmentOperation<T>(work: () => Promise<T>): Promise<T> {
+  const result = enrollmentQueue.catch(() => {}).then(work);
+  enrollmentQueue = result;
   return result;
 }
 
-/**
- * Deletes a specific user's embedding.
- */
-export async function deleteEmbedding(userId: string): Promise<void> {
-  const existing = await getAllEmbeddings();
-  delete existing[userId];
-  await AsyncStorage.setItem(EMBEDDINGS_KEY, JSON.stringify(existing));
+export function attendanceOperation<T>(work: () => Promise<T>): Promise<T> {
+  const result = attendanceQueue.catch(() => {}).then(work);
+  attendanceQueue = result;
+  return result;
 }
 
-// ─────────────────────────────────────────────────────
-// Attendance Storage (Marking)
-// ─────────────────────────────────────────────────────
-
-const ATTENDANCE_KEY = '@datalake_attendance';
-
-/**
- * Saves an attendance record locally.
- */
-export async function saveAttendance(record: AttendanceRecord): Promise<void> {
-  const existing = await getAllAttendance();
-  existing.push(record);
-  await AsyncStorage.setItem(ATTENDANCE_KEY, JSON.stringify(existing));
+async function migrateEnrollments(): Promise<void> {
+  const legacy = await secureStorage.getItem(EMBEDDINGS_KEY);
+  if (!legacy) return;
+  const native = nativeFaceStorage();
+  const registered = JSON.parse(await native.getRegisteredUsers()) as Record<string, StoredUser>;
+  for (const user of Object.values(JSON.parse(legacy)) as StoredUser[]) {
+    if (!registered[user.userId]) await native.saveRegisteredUser(JSON.stringify(user));
+  }
+  // Remove only after every native transaction commits. Retries are idempotent.
+  await secureStorage.removeItem(EMBEDDINGS_KEY);
 }
 
-/**
- * Retrieves all stored attendance records.
- */
+export function saveEmbedding(user: StoredUser): Promise<void> {
+  return enrollmentOperation(async () => {
+    if (!user.embedding.length || !user.embedding.every(Number.isFinite)) throw new Error('Invalid embedding');
+    await migrateEnrollments();
+    // Embedding and UI metadata commit together in native SQLite.
+    await nativeFaceStorage().saveRegisteredUser(JSON.stringify(user));
+  });
+}
+
+/** Recover cross-store interruptions without restoring an old password snapshot. */
+export function reconcileEnrollments(registeredUsers: Record<string, User>, enrollments: Record<string, StoredUser>): Record<string, User> {
+  const recovered = { ...registeredUsers };
+  for (const enrollment of Object.values(enrollments)) {
+    const account = enrollment.account;
+    if (!account || account.id !== enrollment.userId || !account.passwordHash) continue;
+    const email = account.email.trim().toLowerCase();
+    const previous = recovered[email];
+    if (previous && previous.id !== account.id) continue;
+    recovered[email] = { ...(previous ?? account), faceRegistered: true, faceImageUri: enrollment.faceImageUri };
+  }
+  for (const [email, account] of Object.entries(recovered)) {
+    if (!enrollments[account.id]) recovered[email] = { ...account, faceRegistered: false, faceImageUri: undefined };
+  }
+  return recovered;
+}
+
+export function getAllEmbeddings(): Promise<Record<string, StoredUser>> {
+  return enrollmentOperation(async () => {
+    await migrateEnrollments();
+    return JSON.parse(await nativeFaceStorage().getRegisteredUsers());
+  });
+}
+
+export async function getEmbeddingsForNative(): Promise<Record<string, number[]>> {
+  const users = await getAllEmbeddings();
+  return Object.fromEntries(Object.entries(users).map(([id, user]) => [id, user.embedding]));
+}
+
+export function deleteEmbedding(userId: string): Promise<void> {
+  return enrollmentOperation(async () => {
+    await migrateEnrollments();
+    await nativeFaceStorage().deleteEmbedding(userId);
+  });
+}
+
 export async function getAllAttendance(): Promise<AttendanceRecord[]> {
-  const raw = await AsyncStorage.getItem(ATTENDANCE_KEY);
-  if (!raw) return [];
-  return JSON.parse(raw);
+  const raw = await secureStorage.getItem(ATTENDANCE_KEY);
+  return raw ? JSON.parse(raw) : [];
 }
 
-/**
- * Gets unsynced attendance records (for AWS sync).
- */
+/** Serializes check-and-save so repeated events/scans cannot create duplicates. */
+export function saveAttendance(record: AttendanceRecord): Promise<AttendanceRecord> {
+  return attendanceOperation(async () => {
+    const records = await getAllAttendance();
+    const previous = records.find((r) => r.userId === record.userId && r.date === record.date);
+    if (previous) return previous;
+    await secureStorage.setItem(ATTENDANCE_KEY, JSON.stringify([...records, record]));
+    return record;
+  });
+}
+
+export async function migrateAttendance(): Promise<void> {
+  await attendanceOperation(async () => {
+    const legacy = await secureStorage.getItem('attendance-storage');
+    const records = await getAllAttendance();
+    if (legacy) {
+      const oldRecords = JSON.parse(legacy).state?.records ?? [];
+      const ids = new Set(records.map((r) => r.id));
+      for (const old of oldRecords) {
+        if (!ids.has(old.id)) { records.push(old); ids.add(old.id); }
+      }
+      await secureStorage.setItem(ATTENDANCE_KEY, JSON.stringify(records));
+      await secureStorage.removeItem('attendance-storage');
+    }
+  });
+}
+
 export async function getUnsyncedAttendance(): Promise<AttendanceRecord[]> {
-  const all = await getAllAttendance();
-  return all.filter((r) => !r.synced);
+  return (await getAllAttendance()).filter((r) => !r.synced);
 }
 
-/**
- * Marks records as synced after successful AWS upload.
- */
-export async function markAsSynced(ids: string[]): Promise<void> {
-  const all = await getAllAttendance();
-  const updated = all.map((r) =>
-    ids.includes(r.id) ? { ...r, synced: true } : r
-  );
-  await AsyncStorage.setItem(ATTENDANCE_KEY, JSON.stringify(updated));
+export function markAsSynced(ids: string[]): Promise<void> {
+  return attendanceOperation(async () => {
+    const records = await getAllAttendance();
+    await secureStorage.setItem(ATTENDANCE_KEY, JSON.stringify(records.map((r) =>
+      ids.includes(r.id) ? { ...r, synced: true, isPurged: true } : r)));
+  });
 }
 
-/**
- * Purges all synced records (AWS Sync & Purge mechanism).
- */
-export async function purgeSyncedRecords(): Promise<number> {
-  const all = await getAllAttendance();
-  const unsynced = all.filter((r) => !r.synced);
-  const purgedCount = all.length - unsynced.length;
-  await AsyncStorage.setItem(ATTENDANCE_KEY, JSON.stringify(unsynced));
-  return purgedCount;
+export function purgeSyncedRecords(): Promise<number> {
+  return attendanceOperation(async () => {
+    const records = await getAllAttendance();
+    const retained = records.filter((r) => !r.synced);
+    await secureStorage.setItem(ATTENDANCE_KEY, JSON.stringify(retained));
+    return records.length - retained.length;
+  });
 }
 
-/**
- * Gets today's attendance record for the current user.
- */
 export async function getTodayRecord(userId: string): Promise<AttendanceRecord | null> {
-  const today = new Date().toISOString().split('T')[0];
-  const all = await getAllAttendance();
-  return all.find((r) => r.userId === userId && r.date === today) || null;
+  return (await getAllAttendance()).find((r) => r.userId === userId && r.date === localDateKey()) ?? null;
 }

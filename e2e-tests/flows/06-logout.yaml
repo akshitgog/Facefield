@@ -1,0 +1,32 @@
+# 06-logout.yaml
+# Flow: Profile Logout → Return to LoginScreen
+# Source of truth: Source_Code/client/screens/profile/ProfileScreen.tsx
+appId: com.helloworld
+---
+# Ensure on Dashboard first
+- extendedWaitUntil:
+    visible: "Mark Attendance|Today's Status|Profile"
+    timeout: 10000
+
+# Navigate to Profile tab
+- tapOn: "Profile"
+- extendedWaitUntil:
+    visible: "Logout|Personal Details"
+    timeout: 5000
+
+# Scroll down to Logout button and tap
+- scroll
+- tapOn: "Logout"
+
+# Confirm the Alert dialog ("Are you sure you want to logout?")
+- extendedWaitUntil:
+    visible: "Logout|Cancel"
+    timeout: 3000
+- tapOn:
+    text: "Logout"
+    index: 1
+
+# Verify returned to Login screen
+- extendedWaitUntil:
+    visible: "Facefield|Login|Create Account"
+    timeout: 8000

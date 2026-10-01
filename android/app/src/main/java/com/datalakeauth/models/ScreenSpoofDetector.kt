@@ -26,6 +26,7 @@ class ScreenSpoofDetector {
     fun analyze(bitmap: Bitmap, faceBox: FaceBox): ScreenSpoofResult {
         val crop = ImageCropUtils.getAlignedFaceCrop(bitmap, faceBox, CROP_SIZE, CROP_SIZE)
         crop.getPixels(pixels, 0, CROP_SIZE, 0, 0, CROP_SIZE, CROP_SIZE)
+        crop.recycle()
 
         var lumaSum = 0f
         for (i in pixels.indices) {

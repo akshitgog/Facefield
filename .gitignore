@@ -9,3 +9,9 @@ ios/Pods/
 *.log
 .env
 .env.*
+e2e-tests/config/.env
+e2e-tests/results/
+*.jks
+*.p12
+*.clixml
+facefield-release.keystore

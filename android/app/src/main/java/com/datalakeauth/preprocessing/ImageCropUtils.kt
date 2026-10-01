@@ -191,7 +191,11 @@ object ImageCropUtils {
         }
 
         val cropped = Bitmap.createBitmap(bitmap, safeLeft, safeTop, cropW, cropH)
-        return Bitmap.createScaledBitmap(cropped, outputWidth, outputHeight, true)
+        val scaled = Bitmap.createScaledBitmap(cropped, outputWidth, outputHeight, true)
+        if (scaled !== cropped) {
+            cropped.recycle()
+        }
+        return scaled
     }
 
     /**
@@ -230,6 +234,10 @@ object ImageCropUtils {
         }
 
         val cropped = Bitmap.createBitmap(bitmap, safeLeft, safeTop, cropW, cropH)
-        return Bitmap.createScaledBitmap(cropped, outputWidth, outputHeight, true)
+        val scaled = Bitmap.createScaledBitmap(cropped, outputWidth, outputHeight, true)
+        if (scaled !== cropped) {
+            cropped.recycle()
+        }
+        return scaled
     }
 }

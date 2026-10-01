@@ -1,0 +1,63 @@
+# duplicate-account-test.yaml
+# Flow: Test B — Duplicate Account Creation Protection
+# Source of truth: SignupScreen.tsx validateStep1 duplicate check
+appId: com.helloworld
+env:
+  TEST_NAME: "Duplicate Tester"
+  EXISTING_EMAIL: "qa.engineer@facefield.internal"
+  TEST_PHONE: "9876543210"
+  TEST_PASSWORD: "password123"
+---
+- launchApp:
+    clearState: false
+
+# Ensure on Login screen
+- extendedWaitUntil:
+    visible: "Facefield|Create Account"
+    timeout: 10000
+
+# Tap Create Account
+- tapOn: "Create Account"
+
+# Verify on Signup Step 1
+- extendedWaitUntil:
+    visible: "Step 1 of 2"
+    timeout: 5000
+
+# Fill Step 1 using already-registered email
+- tapOn: "John Doe"
+- inputText: ${TEST_NAME}
+- hideKeyboard
+
+- tapOn: "you@example.com"
+- inputText: ${EXISTING_EMAIL}
+- hideKeyboard
+
+- tapOn: "e.g. 9876543210"
+- inputText: ${TEST_PHONE}
+- hideKeyboard
+
+- tapOn: "Min 6 characters"
+- inputText: ${TEST_PASSWORD}
+- hideKeyboard
+
+- tapOn: "Re-enter password"
+- inputText: ${TEST_PASSWORD}
+- hideKeyboard
+
+# Tap Continue
+- tapOn: "Continue →"
+
+# Verify duplicate error is displayed and advance is BLOCKED
+- extendedWaitUntil:
+    visible: "An account with this email already exists"
+    timeout: 4000
+
+# Verify still on Step 1 (NOT on Step 2 or Face Registration)
+- assertVisible: "Step 1 of 2"
+
+# Clean up back to Login screen
+- tapOn: "← Back"
+- extendedWaitUntil:
+    visible: "Facefield|Login"
+    timeout: 5000

@@ -69,6 +69,13 @@ def enableProguardInReleaseBuilds = false
  */
 def jscFlavor = 'org.webkit:android-jsc:+'
 
+// Release credentials are supplied by scripts/build-release.ps1 or secure CI env.
+// Never silently sign a release with the Android debug identity.
+def releaseStorePath = System.getenv('FACEFIELD_RELEASE_STORE_FILE')
+def releaseStorePassword = System.getenv('FACEFIELD_RELEASE_STORE_PASSWORD')
+def releaseKeyAlias = System.getenv('FACEFIELD_RELEASE_KEY_ALIAS')
+def releaseKeyPassword = System.getenv('FACEFIELD_RELEASE_KEY_PASSWORD')
+
 android {
     ndkVersion rootProject.ext.ndkVersion
     buildToolsVersion rootProject.ext.buildToolsVersion
@@ -79,11 +86,11 @@ android {
         applicationId "com.helloworld"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 1
-        versionName "1.0"
+        versionCode 2
+        versionName "1.0.1"
     }
     aaptOptions {
-        noCompress "tflite"
+        noCompress "tflite", "task"
     }
     signingConfigs {
         debug {
@@ -92,22 +99,38 @@ android {
             keyAlias 'androiddebugkey'
             keyPassword 'android'
         }
+        release {
+            if (releaseStorePath) storeFile file(releaseStorePath)
+            storePassword releaseStorePassword
+            keyAlias releaseKeyAlias
+            keyPassword releaseKeyPassword
+        }
     }
     buildTypes {
         debug {
             signingConfig signingConfigs.debug
         }
         release {
-            // Caution! In production, you need to generate your own keystore file.
-            // see https://reactnative.dev/docs/signed-apk-android.
-            signingConfig signingConfigs.debug
+            debuggable false
+            signingConfig signingConfigs.release
             minifyEnabled enableProguardInReleaseBuilds
             proguardFiles getDefaultProguardFile("proguard-android.txt"), "proguard-rules.pro"
         }
     }
 }
 
+tasks.configureEach { task ->
+    if (task.name == 'preReleaseBuild') {
+        task.doFirst {
+            if (!releaseStorePath || !releaseStorePassword || !releaseKeyAlias || !releaseKeyPassword) {
+                throw new GradleException('Release signing credentials are missing. Run scripts/build-release.ps1 or provide FACEFIELD_RELEASE_* environment variables.')
+            }
+        }
+    }
+}
+
 dependencies {
+    testImplementation 'junit:junit:4.13.2'
     // The version of react-native is set by the React Native Gradle Plugin
     implementation("com.facebook.react:react-android")
     
@@ -120,10 +143,12 @@ dependencies {
     // MediaPipe for Face Detection and Active Liveness Landmarks
     implementation 'com.google.mediapipe:tasks-vision:0.10.9'
 
-    // Vision Camera explicitly required so custom Frame Processors can compile
-    implementation project(':react-native-vision-camera')
-    // Worklets-core explicitly required for Vision Camera frame processors
-    implementation project(':react-native-worklets-core')
+    // CameraX — replaces react-native-vision-camera for stable, native camera access
+    def camerax_version = "1.3.2"
+    implementation "androidx.camera:camera-core:${camerax_version}"
+    implementation "androidx.camera:camera-camera2:${camerax_version}"
+    implementation "androidx.camera:camera-lifecycle:${camerax_version}"
+    implementation "androidx.camera:camera-view:${camerax_version}"
 
     if (hermesEnabled.toBoolean()) {
         implementation("com.facebook.react:hermes-android")

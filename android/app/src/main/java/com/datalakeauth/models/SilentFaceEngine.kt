@@ -55,6 +55,12 @@ class SilentFaceEngine(context: Context) {
         val tensor27 = TensorPacker.packForSilentFace(resized27)
         val tensor40 = TensorPacker.packForSilentFace(resized40)
 
+        // Recycle intermediate crops immediately after tensor packing
+        crop27.recycle()
+        if (resized27 !== crop27) resized27.recycle()
+        crop40.recycle()
+        if (resized40 !== crop40) resized40.recycle()
+
         // Step 4: Run inference
         // master.md lines 430-439: rawScores are [number, number, number] (3 classes)
         // Class 0 = spoof, Class 1 = live, Class 2 = spoof
@@ -103,12 +109,15 @@ class SilentFaceEngine(context: Context) {
 
     companion object {
         private fun loadModelFile(context: Context, modelName: String): MappedByteBuffer {
-            val fileDescriptor = context.assets.openFd(modelName)
-            val inputStream = FileInputStream(fileDescriptor.fileDescriptor)
-            val fileChannel = inputStream.channel
-            val startOffset = fileDescriptor.startOffset
-            val declaredLength = fileDescriptor.declaredLength
-            return fileChannel.map(FileChannel.MapMode.READ_ONLY, startOffset, declaredLength)
+            return context.assets.openFd(modelName).use { fileDescriptor ->
+                FileInputStream(fileDescriptor.fileDescriptor).use { inputStream ->
+                    inputStream.channel.use { fileChannel ->
+                        val startOffset = fileDescriptor.startOffset
+                        val declaredLength = fileDescriptor.declaredLength
+                        fileChannel.map(FileChannel.MapMode.READ_ONLY, startOffset, declaredLength)
+                    }
+                }
+            }
         }
     }
 }

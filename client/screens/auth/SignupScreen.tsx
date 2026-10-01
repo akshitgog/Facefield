@@ -7,12 +7,14 @@ import {
   KeyboardAvoidingView,
   Platform,
   TouchableOpacity,
+  Alert,
 } from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { Button, TextInput, SafeAreaWrapper } from '../../components';
 import { colors, spacing, typography, radius, fs } from '../../theme';
 import { AuthStackParamList } from '../../navigation/AuthStack';
 import { useUserStore } from '../../store';
+import { hashSecret, flushSecureStorage } from '../../store/secureStorage';
 
 type Props = NativeStackScreenProps<AuthStackParamList, 'Signup'>;
 
@@ -32,6 +34,7 @@ interface FormData {
 
 export const SignupScreen: React.FC<Props> = ({ navigation }) => {
   const [step, setStep] = useState(1);
+  const [submitting, setSubmitting] = useState(false);
   const [form, setForm] = useState<FormData>({
     name: '', email: '', phone: '', password: '', confirmPassword: '',
     address: '', workplace: '', age: '', idCard: '', disability: '', favTeacher: '',
@@ -43,9 +46,20 @@ export const SignupScreen: React.FC<Props> = ({ navigation }) => {
 
   const validateStep1 = () => {
     const e: Partial<FormData> = {};
-    if (!form.name.trim()) e.name = 'Required';
-    if (!/\S+@\S+\.\S+/.test(form.email)) e.email = 'Invalid email';
-    if (!form.phone.trim() || form.phone.length < 10) e.phone = 'Enter valid phone number';
+    const trimmedName = form.name.trim();
+    const normalizedEmail = form.email.trim().toLowerCase();
+    const trimmedPhone = form.phone.trim();
+
+    if (!trimmedName) e.name = 'Required';
+    if (!normalizedEmail || !/\S+@\S+\.\S+/.test(normalizedEmail)) {
+      e.email = 'Invalid email';
+    } else {
+      const existingUsers = useUserStore.getState().registeredUsers;
+      if (existingUsers[normalizedEmail]) {
+        e.email = 'An account with this email already exists';
+      }
+    }
+    if (!trimmedPhone || trimmedPhone.length < 10) e.phone = 'Enter valid phone number';
     if (form.password.length < 6) e.password = 'Min 6 characters';
     if (form.password !== form.confirmPassword) e.confirmPassword = 'Passwords do not match';
     setErrors(e);
@@ -56,7 +70,7 @@ export const SignupScreen: React.FC<Props> = ({ navigation }) => {
     const e: Partial<FormData> = {};
     if (!form.address.trim()) e.address = 'Required';
     if (!form.workplace.trim()) e.workplace = 'Required';
-    if (!form.age || isNaN(Number(form.age))) e.age = 'Enter valid age';
+    if (!form.age.trim() || isNaN(Number(form.age.trim()))) e.age = 'Enter valid age';
     if (!form.idCard.trim()) e.idCard = 'Required';
     if (!form.favTeacher.trim()) e.favTeacher = 'Required for account recovery';
     setErrors(e);
@@ -69,23 +83,40 @@ export const SignupScreen: React.FC<Props> = ({ navigation }) => {
     if (validateStep1()) setStep(2);
   };
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
+    if (submitting) return;
     if (validateStep2()) {
+      const normalizedEmail = form.email.trim().toLowerCase();
+      const existingUsers = useUserStore.getState().registeredUsers;
+      if (existingUsers[normalizedEmail]) {
+        setStep(1);
+        setErrors({ email: 'An account with this email already exists' });
+        return;
+      }
+
+      setSubmitting(true);
+      try {
+      const passwordHash = await hashSecret(form.password);
+      const recoveryAnswerHash = await hashSecret(form.favTeacher.trim().toLowerCase());
       setPendingUser({
         id: Date.now().toString(),
-        name: form.name,
+        name: form.name.trim(),
         email: form.email.trim(),
-        phone: form.phone,
-        address: form.address,
-        workplace: form.workplace,
-        age: parseInt(form.age, 10),
-        idCard: form.idCard,
-        disability: form.disability,
-        favTeacher: form.favTeacher,
-        password: form.password,
+        phone: form.phone.trim(),
+        address: form.address.trim(),
+        workplace: form.workplace.trim(),
+        age: parseInt(form.age.trim(), 10),
+        idCard: form.idCard.trim(),
+        disability: form.disability.trim(),
+        recoveryAnswerHash,
+        passwordHash,
         faceRegistered: false,
       });
+      await flushSecureStorage();
       navigation.navigate('FaceRegistration');
+      } catch {
+        Alert.alert('Error', 'Unable to save your account. Please try again.');
+      } finally { setSubmitting(false); }
     }
   };
 
@@ -145,7 +176,7 @@ export const SignupScreen: React.FC<Props> = ({ navigation }) => {
               </View>
               <TextInput label="Disability (optional)" placeholder="None / specify if applicable" value={form.disability} onChangeText={set('disability')} />
               <TextInput label="Security Question" placeholder="Favorite teacher or food?" value={form.favTeacher} onChangeText={set('favTeacher')} error={errors.favTeacher} />
-              <Button label="Register & Set Up Face →" onPress={handleSubmit} size="lg" style={{ marginTop: spacing.sm }} />
+              <Button label="Register & Set Up Face →" onPress={handleSubmit} loading={submitting} size="lg" style={{ marginTop: spacing.sm }} />
             </View>
           )}
         </ScrollView>

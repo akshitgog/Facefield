@@ -13,6 +13,7 @@ import { Button, TextInput, SafeAreaWrapper } from '../../components';
 import { colors, spacing, typography, fs } from '../../theme';
 import { useUserStore } from '../../store';
 import { AuthStackParamList } from '../../navigation/AuthStack';
+import { verifySecret, flushSecureStorage } from '../../store/secureStorage';
 
 type Props = NativeStackScreenProps<AuthStackParamList, 'ForgotPassword'>;
 
@@ -41,7 +42,7 @@ export const ForgotPasswordScreen: React.FC<Props> = ({ navigation }) => {
     }
   };
 
-  const handleVerifyAnswer = () => {
+  const handleVerifyAnswer = async () => {
     if (!answer.trim()) {
       Alert.alert('Error', 'Please enter your answer.');
       return;
@@ -50,14 +51,16 @@ export const ForgotPasswordScreen: React.FC<Props> = ({ navigation }) => {
     const key = email.trim().toLowerCase();
     const foundUser = registeredUsers[key];
 
-    if (foundUser && foundUser.favTeacher.trim().toLowerCase() === answer.trim().toLowerCase()) {
+    try {
+    if (foundUser?.recoveryAnswerHash && await verifySecret(answer.trim().toLowerCase(), foundUser.recoveryAnswerHash)) {
       setStep(3);
     } else {
       Alert.alert('Error', 'Incorrect answer.');
     }
+    } catch { Alert.alert('Error', 'Unable to verify your answer. Please try again.'); }
   };
 
-  const handleResetPassword = () => {
+  const handleResetPassword = async () => {
     if (newPassword.length < 6) {
       Alert.alert('Error', 'Password must be at least 6 characters.');
       return;
@@ -67,10 +70,13 @@ export const ForgotPasswordScreen: React.FC<Props> = ({ navigation }) => {
       return;
     }
 
-    updatePassword(email, newPassword);
+    try {
+    await updatePassword(email, newPassword);
+    await flushSecureStorage();
     Alert.alert('Success', 'Your password has been successfully updated.', [
       { text: 'OK', onPress: () => navigation.goBack() }
     ]);
+    } catch { Alert.alert('Error', 'Unable to save your new password. Please try again.'); }
   };
 
   return (

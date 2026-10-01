@@ -19,9 +19,11 @@ import com.datalakeauth.utils.MathUtils
  * This is intentionally kept simple — the augmentations are just
  * slight brightness/contrast/rotation tweaks, not advanced transforms.
  */
-class RegistrationEngine(context: Context) {
-
-    private val faceNetEngine = FaceNetEngine(context)
+class RegistrationEngine(
+    context: Context,
+    private val faceNetEngine: FaceNetEngine = FaceNetEngine(context),
+    private val ownsFaceNetEngine: Boolean = true
+) {
 
     /**
      * Generates a robust face embedding from a single captured frame.
@@ -41,12 +43,20 @@ class RegistrationEngine(context: Context) {
         // Step 1: Aligned square face crop → 112×112
         val alignedCrop = ImageCropUtils.getAlignedFaceCrop(bitmap, faceBox, 112, 112)
 
-        // Step 2: Generate 5 variants
+        // Step 2: Generate 5 variants (variants[0] is alignedCrop, 1..4 are new bitmaps)
         val variants: List<Bitmap> = SimpleAugmentation.generateVariants(alignedCrop)
 
         // Step 3: Extract embedding from each variant
-        val embeddings: List<FloatArray> = variants.map { variant ->
-            faceNetEngine.extractEmbeddingFromCrop(variant)
+        val embeddings: List<FloatArray> = try {
+            variants.map { variant ->
+                faceNetEngine.extractEmbeddingFromCrop(variant)
+            }
+        } finally {
+            // Step 2 cleanup: recycle augmented variant bitmaps and alignedCrop
+            for (i in 1 until variants.size) {
+                variants[i].recycle()
+            }
+            alignedCrop.recycle()
         }
 
         // Step 4: Average all embeddings
@@ -66,6 +76,6 @@ class RegistrationEngine(context: Context) {
     }
 
     fun close() {
-        faceNetEngine.close()
+        if (ownsFaceNetEngine) faceNetEngine.close()
     }
 }

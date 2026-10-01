@@ -6,7 +6,6 @@ import {
   ScrollView,
   TouchableOpacity,
   Image,
-  Alert,
 } from 'react-native';
 import { BottomTabScreenProps } from '@react-navigation/bottom-tabs';
 import { CompositeScreenProps, useFocusEffect } from '@react-navigation/native';
@@ -16,6 +15,7 @@ import { colors, spacing, typography, radius, fs, shadow } from '../../theme';
 import { useUserStore, useAttendanceStore } from '../../store';
 import { AppTabParamList } from '../../navigation/AppTabs';
 import { RootStackParamList } from '../../navigation/RootNavigator';
+import { localDateKey } from '../../store/localDate';
 
 type Props = CompositeScreenProps<
   BottomTabScreenProps<AppTabParamList, 'Home'>,
@@ -24,11 +24,11 @@ type Props = CompositeScreenProps<
 
 export const DashboardScreen: React.FC<Props> = ({ navigation }) => {
   const { user } = useUserStore();
-  const { todayRecord, syncAndPurgeDemo } = useAttendanceStore();
-  const allRecords = useAttendanceStore((state) => state.records);
+  const records = useAttendanceStore((state) => state.records);
+  const allRecords = records.filter(record => record.userId === user?.id);
+  const todayRecord = allRecords.find(record => record.date === localDateKey(new Date()));
   const [greeting, setGreeting] = useState('Good morning');
   const [currentDateStr, setCurrentDateStr] = useState('');
-  const [isSyncing, setIsSyncing] = useState(false);
 
   useFocusEffect(
     useCallback(() => {
@@ -130,7 +130,7 @@ export const DashboardScreen: React.FC<Props> = ({ navigation }) => {
 
         {/* Weekly Summary */}
         <Card style={styles.weeklyCard}>
-          <Text style={styles.weeklyTitle}>This Week</Text>
+          <Text style={styles.weeklyTitle}>Attendance Summary</Text>
           <View style={styles.weeklyRow}>
             <View style={styles.weeklyItem}>
               <Text style={styles.weeklyCount}>{allRecords.filter(r => r.status === 'present').length}</Text>
@@ -178,26 +178,9 @@ export const DashboardScreen: React.FC<Props> = ({ navigation }) => {
             </Text>
           </View>
           <Button
-            label={isSyncing ? "Syncing..." : "Sync to AWS (Purge Local)"}
-            disabled={isSyncing || allRecords.length === 0}
-            onPress={async () => {
-              setIsSyncing(true);
-              try {
-                const count = await syncAndPurgeDemo();
-                if (count > 0) {
-                  Alert.alert(
-                    'AWS Sync Successful',
-                    `Successfully uploaded ${count} records to AWS. Local records have been purged to save space.`
-                  );
-                } else {
-                  Alert.alert('AWS Sync', 'All records are already synced.');
-                }
-              } catch (e) {
-                Alert.alert('Sync Failed', 'Could not connect to AWS. Try again later.');
-              } finally {
-                setIsSyncing(false);
-              }
-            }}
+            label="AWS sync unavailable (offline only)"
+            disabled={true}
+            onPress={() => {}}
             variant="outline"
             style={styles.syncBtn}
           />

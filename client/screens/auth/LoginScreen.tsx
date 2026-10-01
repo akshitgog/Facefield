@@ -14,14 +14,22 @@ import { Button, TextInput, SafeAreaWrapper } from '../../components';
 import { colors, spacing, typography, fs } from '../../theme';
 import { useUserStore } from '../../store';
 import { AuthStackParamList } from '../../navigation/AuthStack';
+import { verifySecret } from '../../store/secureStorage';
 
 type Props = NativeStackScreenProps<AuthStackParamList, 'Login'>;
 
-export const LoginScreen: React.FC<Props> = ({ navigation }) => {
-  const [email, setEmail] = useState('');
+export const LoginScreen: React.FC<Props> = ({ navigation, route }) => {
+  const prefilled = route?.params?.prefilledEmail;
+  const [email, setEmail] = useState(prefilled || '');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [errors, setErrors] = useState<{ email?: string; password?: string }>({});
+
+  React.useEffect(() => {
+    if (route?.params?.prefilledEmail) {
+      setEmail(route.params.prefilledEmail);
+    }
+  }, [route?.params?.prefilledEmail]);
 
   const { registeredUsers, setUser, setToken } = useUserStore();
 
@@ -36,6 +44,7 @@ export const LoginScreen: React.FC<Props> = ({ navigation }) => {
   };
 
   const handleLogin = async () => {
+    if (loading) return;
     if (!validate()) return;
     setLoading(true);
     try {
@@ -50,7 +59,7 @@ export const LoginScreen: React.FC<Props> = ({ navigation }) => {
         return;
       }
 
-      if (found.password && found.password !== password) {
+      if (!found.passwordHash || !(await verifySecret(password, found.passwordHash))) {
         Alert.alert('Login failed', 'Incorrect password.');
         setLoading(false);
         return;

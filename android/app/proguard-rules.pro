@@ -8,3 +8,13 @@
 #   http://developer.android.com/guide/developing/tools/proguard.html
 
 # Add any project specific keep options here:
+
+# FaceField / DatalakeAuth Native Plugin & Models
+-keep class com.datalakeauth.** { *; }
+
+# TensorFlow Lite & LiteRT
+-keep class org.tensorflow.lite.** { *; }
+-keep class com.google.ai.edge.litert.** { *; }
+
+# MediaPipe Vision Tasks
+-keep class com.google.mediapipe.** { *; }

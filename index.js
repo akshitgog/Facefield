@@ -1,5 +1,3 @@
-import * as Worklets from 'react-native-worklets-core';
-console.log("Worklets forced load: ", !!Worklets);
 import {AppRegistry} from 'react-native';
 import App from './App';
 

@@ -1,0 +1,137 @@
+# generate-report.ps1 — Generates human-readable and machine-readable test reports
+$ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+$BaseDir = Split-Path -Parent $ScriptDir
+$ResultsDir = Join-Path $BaseDir "results"
+$ReportsDir = Join-Path $ResultsDir "reports"
+
+if (-not (Test-Path $ReportsDir)) { New-Item -ItemType Directory -Path $ReportsDir -Force | Out-Null }
+
+$ts = Get-Date -Format "yyyyMMdd_HHmmss"
+$reportFile = Join-Path $ReportsDir "report_$ts.md"
+
+# Load results
+$r = @{ overallStatus = "UNKNOWN"; mode = "unknown"; scenarios = @(); crashes = @{}; memory = @{} }
+$latestJson = Join-Path $ResultsDir "latest.json"
+if (Test-Path $latestJson) {
+    $r = Get-Content $latestJson | ConvertFrom-Json
+}
+
+# Load device info
+$dev = @{ manufacturer = "?"; model = "?"; android = "?"; sdk = "?"; abi = "?"; ramMB = 0; display = "?" }
+$devJson = Join-Path $ResultsDir "device-info.json"
+if (Test-Path $devJson) { $dev = Get-Content $devJson | ConvertFrom-Json }
+
+# Load APK info
+$apk = @{ apkPath = "?"; apkSizeMB = 0; apkModified = "?" }
+$apkJson = Join-Path $ResultsDir "apk-info.json"
+if (Test-Path $apkJson) { $apk = Get-Content $apkJson | ConvertFrom-Json }
+
+# Load crash forensics
+$crashes = @{ sigbus = 0; sigsegv = 0; sigabrt = 0; oom = 0; fatal = 0; historicalSignature = $false }
+$crashJson = Join-Path $ResultsDir "crash-forensics.json"
+if (Test-Path $crashJson) { $crashes = Get-Content $crashJson | ConvertFrom-Json }
+
+# Memory analysis
+$memCsv = Join-Path $ResultsDir "memory\memory.csv"
+$memSummary = ""
+if (Test-Path $memCsv) {
+    $csv = Import-Csv $memCsv
+    if ($csv.Count -gt 0) {
+        $baseline = [int]$csv[0].TotalPssKB
+        $peak = ($csv | ForEach-Object { [int]$_.TotalPssKB } | Measure-Object -Maximum).Maximum
+        $final = [int]$csv[-1].TotalPssKB
+        $growthMB = [Math]::Round(($final - $baseline) / 1024, 2)
+        $memSummary = @"
+
+## Memory Profiling
+
+| Metric | KB | MB |
+|---|---|---|
+| Baseline PSS | $baseline | $([Math]::Round($baseline/1024,1)) |
+| Peak PSS | $peak | $([Math]::Round($peak/1024,1)) |
+| Final PSS | $final | $([Math]::Round($final/1024,1)) |
+| **Net Growth** | $($final - $baseline) | **$growthMB** |
+
+Memory snapshots: ``e2e-tests/results/memory/memory.csv``
+"@
+    }
+}
+
+# Build scenario table
+$scenarioTable = ""
+if ($r.scenarios -and $r.scenarios.Count -gt 0) {
+    $scenarioTable = "`n## Scenario Results`n`n| Scenario | Flow | Status | Human Required |`n|---|---|---|---|`n"
+    foreach ($s in $r.scenarios) {
+        $statusIcon = switch ($s.status) {
+            "PASSED" { "✅ PASS" }
+            "FAILED" { "❌ FAIL" }
+            "HUMAN_STEP_REQUIRED" { "🧑 HUMAN" }
+            "SKIPPED" { "⏭ SKIP" }
+            default { "⚪ $($s.status)" }
+        }
+        $human = if ($s.humanRequired) { "Yes" } else { "No" }
+        $scenarioTable += "| $($s.name) | $($s.flow) | $statusIcon | $human |`n"
+    }
+}
+
+$md = @"
+# FaceField E2E Release Test Report
+
+**Generated:** $(Get-Date -Format "yyyy-MM-dd HH:mm:ss")
+**Overall Verdict:** **$($r.overallStatus)**
+**Test Mode:** $($r.mode)
+**Duration:** $($r.durationSeconds)s
+
+---
+
+## Device & Build
+
+| Property | Value |
+|---|---|
+| Device | $($dev.manufacturer) $($dev.model) |
+| Serial | $($dev.serial) |
+| Android | $($dev.android) (API $($dev.sdk)) |
+| ABI | $($dev.abi) |
+| RAM | $($dev.ramMB) MB |
+| Display | $($dev.display) |
+| APK | $($apk.apkPath) |
+| APK Size | $($apk.apkSizeMB) MB |
+| APK Built | $($apk.apkModified) |
+$scenarioTable
+## Native Crash Forensics
+
+| Signal | Count | Status |
+|---|---|---|
+| SIGBUS (7) | $($crashes.sigbus) | $(if ([int]$crashes.sigbus -eq 0) { "✅ PASS" } else { "❌ FAIL" }) |
+| SIGSEGV (11) | $($crashes.sigsegv) | $(if ([int]$crashes.sigsegv -eq 0) { "✅ PASS" } else { "❌ FAIL" }) |
+| SIGABRT (6) | $($crashes.sigabrt) | $(if ([int]$crashes.sigabrt -eq 0) { "✅ PASS" } else { "❌ FAIL" }) |
+| OOM | $($crashes.oom) | $(if ([int]$crashes.oom -eq 0) { "✅ PASS" } else { "❌ FAIL" }) |
+| Fatal Exception | $($crashes.fatal) | $(if ([int]$crashes.fatal -eq 0) { "✅ PASS" } else { "❌ FAIL" }) |
+| **Historical SIGBUS/BUS_ADRALN** | $(if ($crashes.historicalSignature) { "REPRODUCED" } else { "Not observed" }) | $(if ($crashes.historicalSignature) { "❌ FAIL" } else { "✅ PASS" }) |
+
+Process restarts detected: $($r.processRestarts)
+$memSummary
+
+## Stress Testing
+
+| Metric | Value |
+|---|---|
+| Cycles Attempted | $($r.stressCyclesAttempted) |
+| Cycles Completed | $($r.stressCyclesCompleted) |
+| Completion Rate | $(if ($r.stressCyclesAttempted -gt 0) { "$([Math]::Round($r.stressCyclesCompleted / $r.stressCyclesAttempted * 100, 1))%" } else { "N/A" }) |
+
+## Artifacts
+
+- Machine-readable: ``e2e-tests/results/latest.json``
+- Memory CSV: ``e2e-tests/results/memory/memory.csv``
+- Crash forensics: ``e2e-tests/results/crash-forensics.json``
+- Full logcat: ``e2e-tests/results/logcat/``
+- Failure evidence: ``e2e-tests/results/failures/``
+
+---
+
+*Generated by FaceField E2E Test Harness*
+"@
+
+Set-Content -Path $reportFile -Value $md -Encoding UTF8
+Write-Host "[+] Report: $reportFile" -ForegroundColor Green

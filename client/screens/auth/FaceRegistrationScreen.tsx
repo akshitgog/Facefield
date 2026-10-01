@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View,
   Text,
@@ -9,6 +9,7 @@ import {
   ScrollView,
   Image,
   AppState,
+  PermissionsAndroid,
 } from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useIsFocused } from '@react-navigation/native';
@@ -16,9 +17,9 @@ import { Button, SafeAreaWrapper } from '../../components';
 import { colors, spacing, typography, radius, fs } from '../../theme';
 import { useUserStore } from '../../store';
 import { AuthStackParamList } from '../../navigation/AuthStack';
-import { Camera, useCameraDevice, useCameraPermission } from 'react-native-vision-camera';
-import { useFaceAuth, FaceAuthResult } from '../../plugins/faceAuthPlugin';
+import { CameraXView, FaceAuthResult } from '../../plugins/faceAuthPlugin';
 import { saveEmbedding, StoredUser } from '../../store/embeddingStorage';
+import { flushSecureStorage } from '../../store/secureStorage';
 
 type Props = NativeStackScreenProps<AuthStackParamList, 'FaceRegistration'>;
 
@@ -32,22 +33,41 @@ export const FaceRegistrationScreen: React.FC<Props> = ({ navigation }) => {
   const [phase, setPhase] = useState<'idle' | 'camera' | 'processing' | 'success'>('idle');
   const [indicators, setIndicators] = useState<Indicator[]>([
     { label: 'Face detected', status: 'idle' },
-    { label: 'Face aligned', status: 'idle' }
+    { label: 'Quality & Lighting', status: 'idle' }
   ]);
-  const [photoUri, setPhotoUri] = useState<string | undefined>();
-  const photoUriRef = React.useRef<string | undefined>();
-  const cameraRef = React.useRef<Camera>(null);
+  const [feedback, setFeedback] = useState<string>('Position your face within the oval');
+  const [hasPermission, setHasPermission] = useState(false);
+  const [frameSeen, setFrameSeen] = useState(false);
+  const [cameraError, setCameraError] = useState<string | null>(null);
+  const isHandledRef = useRef(false);
+  const phaseRef = useRef(phase);
+  phaseRef.current = phase;
 
   const { setFaceRegistered, user, isLoggedIn, registerUser } = useUserStore();
-  const { hasPermission, requestPermission } = useCameraPermission();
-  const device = useCameraDevice('front');
+  const userRef = useRef(user);
+  userRef.current = user;
+
   const isFocused = useIsFocused();
   const [appActive, setAppActive] = useState(AppState.currentState === 'active');
-
+  const mountedRef = useRef(true);
+  const activeRef = useRef(false);
+  activeRef.current = isFocused && appActive;
+  useEffect(() => { mountedRef.current = true; return () => { mountedRef.current = false; }; }, []);
+  useEffect(() => navigation.addListener('beforeRemove', () => {
+    activeRef.current = false;
+    phaseRef.current = 'idle';
+  }), [navigation]);
   const [isReady, setIsReady] = useState(false);
 
   useEffect(() => {
     const sub = AppState.addEventListener('change', (state) => {
+      if (state !== 'active') {
+        activeRef.current = false;
+        if (phaseRef.current === 'camera') {
+          phaseRef.current = 'idle';
+          setPhase('idle');
+        }
+      }
       setAppActive(state === 'active');
     });
     return () => sub.remove();
@@ -60,76 +80,123 @@ export const FaceRegistrationScreen: React.FC<Props> = ({ navigation }) => {
     return () => clearTimeout(timer);
   }, []);
 
+  // Camera permission via standard PermissionsAndroid
   useEffect(() => {
-    if (!hasPermission) {
-      requestPermission();
-    }
-  }, [hasPermission, requestPermission]);
+    (async () => {
+      const result = await PermissionsAndroid.request(
+        PermissionsAndroid.PERMISSIONS.CAMERA,
+        {
+          title: 'Camera Permission',
+          message: 'FaceField needs camera access for face registration.',
+          buttonPositive: 'OK',
+        }
+      );
+      setHasPermission(result === PermissionsAndroid.RESULTS.GRANTED);
+    })();
+  }, []);
 
   useEffect(() => {
     let timeoutId: NodeJS.Timeout;
     if (phase === 'camera') {
       timeoutId = setTimeout(() => {
+        phaseRef.current = 'idle';
         setPhase('idle');
         Alert.alert(
           'Timeout',
-          'Registration took too long. Please ensure good lighting, look straight, and hold still.'
+          'Registration took too long. Please ensure good lighting, look straight, blink, then hold still.'
         );
       }, 15000); // 15 seconds timeout
     }
     return () => clearTimeout(timeoutId);
   }, [phase]);
 
-  const { frameProcessor } = useFaceAuth({
-    mode: 'registration',
-    onResult: async (result: FaceAuthResult) => {
-      if (phase !== 'camera') return;
+  // Stable callback via refs — never recreated, no stale closures
+  const handleFaceResult = useCallback(async (event: { nativeEvent: FaceAuthResult }) => {
+    if (!mountedRef.current || !activeRef.current) return;
+    const result = event.nativeEvent;
+    if (result.frameProcessed) setFrameSeen(true);
+    if (result.status === 'ERROR') {
+      phaseRef.current = 'idle';
+      setPhase('idle');
+      setCameraError(result.reason);
+      return;
+    }
+    if (result.status === 'REJECT' && phaseRef.current === 'camera') {
+      phaseRef.current = 'idle';
+      setPhase('idle');
+      Alert.alert('Registration Failed', result.reason);
+      return;
+    }
 
-      if (result.faceDetected) {
-        setIndicators([
-          { label: 'Face detected', status: 'ok' },
-          { label: 'Quality & Lighting', status: result.qualityPassed ? 'ok' : 'warn' },
-        ]);
-      } else {
-        setIndicators([
-          { label: 'Face detected', status: 'warn' },
-          { label: 'Quality & Lighting', status: 'idle' }
-        ]);
-      }
+    // 1. Always update real-time indicators
+    if (result.faceDetected) {
+      setIndicators([
+        { label: 'Face detected', status: 'ok' },
+        { label: 'Quality & Lighting', status: result.qualityPassed ? 'ok' : 'warn' },
+      ]);
+    } else {
+      setIndicators([
+        { label: 'Face detected', status: 'warn' },
+        { label: 'Quality & Lighting', status: 'idle' }
+      ]);
+    }
 
-      if (result.status === 'EMBEDDING' && result.embedding) {
-        setPhase('processing');
-        try {
-          // Build permanent face image URI from native-cropped base64
-          const permanentFaceUri = result.faceBase64
-            ? `data:image/jpeg;base64,${result.faceBase64}`
-            : photoUriRef.current;
+    if (result.reason) {
+      setFeedback(result.reason);
+    }
 
-          const storedUser: StoredUser = {
-            userId: user?.id ?? Date.now().toString(),
-            name: user?.name ?? 'Unknown',
-            email: user?.email ?? '',
-            embedding: result.embedding,
-            faceImageUri: permanentFaceUri,
-            registeredAt: new Date().toISOString(),
-          };
-          // saveEmbedding uses CONFLICT_REPLACE — old embedding is overwritten
-          await saveEmbedding(storedUser);
-          // Update user state with permanent face image
-          setFaceRegistered(permanentFaceUri);
-          // Persist updated user into multi-user registry (overwrites old entry)
-          registerUser();
+    // 2. Only proceed to save if the user clicked Capture
+    if (phaseRef.current !== 'camera' || isHandledRef.current) return;
+
+    if (result.status === 'EMBEDDING' && result.embedding) {
+      if (isHandledRef.current) return;
+      isHandledRef.current = true;
+      phaseRef.current = 'processing';
+      setPhase('processing');
+      try {
+        // Build permanent face image URI from native-cropped base64
+        const permanentFaceUri = result.faceBase64
+          ? `data:image/jpeg;base64,${result.faceBase64}`
+          : undefined;
+
+        const currentUser = userRef.current;
+        if (!currentUser) throw new Error('Account is unavailable');
+        const storedUser: StoredUser = {
+          userId: currentUser.id,
+          name: currentUser.name,
+          email: currentUser.email,
+          embedding: result.embedding,
+          faceImageUri: permanentFaceUri,
+          registeredAt: new Date().toISOString(),
+          account: { ...currentUser, faceRegistered: true, faceImageUri: permanentFaceUri },
+        };
+        // saveEmbedding uses CONFLICT_REPLACE — old embedding is overwritten
+        await saveEmbedding(storedUser);
+        if (!mountedRef.current || userRef.current?.id !== currentUser.id) return;
+        // Update user state with permanent face image
+        setFaceRegistered(permanentFaceUri);
+        // Persist updated user into multi-user registry (overwrites old entry)
+        registerUser();
+        await flushSecureStorage();
+        if (mountedRef.current) {
+          phaseRef.current = 'success';
           setPhase('success');
-        } catch (e) {
-          Alert.alert('Error', 'Failed to save embedding.');
-          setPhase('idle');
         }
+      } catch (e) {
+        if (!mountedRef.current) return;
+        isHandledRef.current = false;
+        phaseRef.current = 'idle';
+        Alert.alert('Error', 'Failed to save embedding.');
+        setPhase('idle');
       }
-    },
-  });
+    }
+  }, [setFaceRegistered, registerUser]);
 
   // ── Handlers ──
   const handleStartCapture = () => {
+    if (!hasPermission || cameraError) return;
+    isHandledRef.current = false;
+    phaseRef.current = 'camera';
     setPhase('camera');
   };
 
@@ -155,16 +222,15 @@ export const FaceRegistrationScreen: React.FC<Props> = ({ navigation }) => {
             5 augmented embeddings generated, averaged, and L2-normalized.
           </Text>
           <Button
-            label="Go to Dashboard"
+            label={isLoggedIn ? 'Go to Dashboard' : 'Continue to Login'}
             onPress={() => {
               if (isLoggedIn) {
-                Alert.alert('Success', 'Face updated successfully.', [
-                  { text: 'OK', onPress: () => navigation.goBack() }
-                ]);
+                navigation.goBack();
               } else {
-                Alert.alert('Success', 'Account created successfully. Please login with your password.', [
-                  { text: 'OK', onPress: () => (navigation as any).reset({ index: 0, routes: [{ name: 'Login' }] }) }
-                ]);
+                (navigation as any).reset({
+                  index: 0,
+                  routes: [{ name: 'Login', params: { prefilledEmail: user?.email } }],
+                });
               }
             }}
             size="lg"
@@ -183,34 +249,36 @@ export const FaceRegistrationScreen: React.FC<Props> = ({ navigation }) => {
         <View style={styles.header}>
           <Text style={typography.h2}>Register Your Face</Text>
           <Text style={typography.small}>
-            Hold still to complete registration.
+            Tap capture, blink, then hold still to complete registration.
           </Text>
         </View>
 
         {/* Camera preview area */}
         <View style={styles.cameraWrap}>
-          {device && hasPermission && isReady ? (
-            <Camera
-              ref={cameraRef}
+          {hasPermission && isReady ? (
+            <CameraXView
               style={StyleSheet.absoluteFill}
-              device={device}
-              isActive={isFocused && appActive}
-              photo={true}
-              frameProcessor={phase === 'camera' ? frameProcessor : undefined}
-              pixelFormat="yuv"
+              mode="registration"
+              isActive={isFocused && appActive && phase !== 'processing' && !cameraError}
+              isCaptureRequested={phase === 'camera'}
+              onFaceAuthResult={handleFaceResult}
             />
           ) : (
             <View style={styles.cameraPlaceholder}>
               <Text style={styles.camPlaceholderText}>Camera Permission Required</Text>
-              <Button 
-                label="Grant Permission" 
+              <Button
+                label="Grant Permission"
                 onPress={async () => {
-                  const result = await requestPermission();
-                  if (!result) {
+                  const result = await PermissionsAndroid.request(
+                    PermissionsAndroid.PERMISSIONS.CAMERA
+                  );
+                  if (result !== PermissionsAndroid.RESULTS.GRANTED) {
                     Alert.alert('Permission Denied', 'Please enable camera access in your device settings.');
+                  } else {
+                    setHasPermission(true);
                   }
-                }} 
-                size="sm" 
+                }}
+                size="sm"
               />
             </View>
           )}
@@ -221,10 +289,16 @@ export const FaceRegistrationScreen: React.FC<Props> = ({ navigation }) => {
           {/* Instruction */}
           <View style={styles.camInstruction}>
             <Text style={styles.camInstructionText}>
-              {phase === 'processing' ? '⚡ Generating embeddings…' : 'Position your face within the oval'}
+              {phase === 'processing' ? '⚡ Generating embeddings…' : feedback}
             </Text>
           </View>
         </View>
+
+        {frameSeen && !cameraError && <Text testID="camera-analysis-ready">Camera ready</Text>}
+        {cameraError && <>
+          <Text testID="camera-error">{cameraError}</Text>
+          <Button label="Retry Camera" onPress={() => { setCameraError(null); setFrameSeen(false); }} />
+        </>}
 
         {/* Quality indicators */}
         <View style={styles.indicators}>
@@ -257,11 +331,14 @@ export const FaceRegistrationScreen: React.FC<Props> = ({ navigation }) => {
         />
         <Button
           label="Retake"
+          disabled={phase === 'processing'}
           onPress={() => {
+            phaseRef.current = 'idle';
+            isHandledRef.current = false;
             setPhase('idle');
             setIndicators([
               { label: 'Face detected', status: 'idle' },
-              { label: 'Face aligned', status: 'idle' }
+              { label: 'Quality & Lighting', status: 'idle' }
             ]);
           }}
           variant="outline"
@@ -316,17 +393,17 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   camInstructionText: { color: colors.white, fontSize: fs(13) },
-  indicators: { 
-    flexDirection: 'row', 
-    flexWrap: 'wrap', 
-    justifyContent: 'space-between', 
-    marginBottom: spacing.md 
+  indicators: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+    marginBottom: spacing.md
   },
-  indRow: { 
-    flexDirection: 'row', 
-    alignItems: 'center', 
-    width: '48%', 
-    marginBottom: spacing.sm 
+  indRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    width: '48%',
+    marginBottom: spacing.sm
   },
   dot: { width: 10, height: 10, borderRadius: 5, marginRight: spacing.xs },
   dotGreen: { backgroundColor: colors.success },

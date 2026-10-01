@@ -51,6 +51,7 @@ class FaceNetEngine(context: Context) {
 
         // Step 2: Pack as RGB, float32, divide by 255, NCHW
         val tensor = TensorPacker.packForMobileFaceNet(alignedCrop)
+        alignedCrop.recycle()
 
         // Step 3: Run inference
         val output = Array(1) { FloatArray(embeddingSize) }
@@ -120,12 +121,15 @@ class FaceNetEngine(context: Context) {
 
     companion object {
         private fun loadModelFile(context: Context, modelName: String): MappedByteBuffer {
-            val fileDescriptor = context.assets.openFd(modelName)
-            val inputStream = FileInputStream(fileDescriptor.fileDescriptor)
-            val fileChannel = inputStream.channel
-            val startOffset = fileDescriptor.startOffset
-            val declaredLength = fileDescriptor.declaredLength
-            return fileChannel.map(FileChannel.MapMode.READ_ONLY, startOffset, declaredLength)
+            return context.assets.openFd(modelName).use { fileDescriptor ->
+                FileInputStream(fileDescriptor.fileDescriptor).use { inputStream ->
+                    inputStream.channel.use { fileChannel ->
+                        val startOffset = fileDescriptor.startOffset
+                        val declaredLength = fileDescriptor.declaredLength
+                        fileChannel.map(FileChannel.MapMode.READ_ONLY, startOffset, declaredLength)
+                    }
+                }
+            }
         }
     }
 }

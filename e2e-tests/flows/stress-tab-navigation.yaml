@@ -1,0 +1,15 @@
+# stress-tab-navigation.yaml
+# Reliability: Rapid tab switching cycle (Home -> History -> Profile -> Home)
+# Tests React Navigation state management under rapid transitions
+appId: com.helloworld
+---
+- extendedWaitUntil:
+    visible: "Mark Attendance|Today's Status"
+    timeout: 10000
+
+- repeat:
+    times: ${STRESS_CYCLES}
+    commands:
+      - tapOn: "History"
+      - tapOn: "Profile"
+      - tapOn: "Home"

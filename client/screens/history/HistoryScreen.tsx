@@ -3,14 +3,17 @@ import { View, Text, StyleSheet, ScrollView } from 'react-native';
 import { BottomTabScreenProps } from '@react-navigation/bottom-tabs';
 import { SafeAreaWrapper } from '../../components';
 import { colors, spacing, typography, radius, fs } from '../../theme';
-import { useAttendanceStore } from '../../store';
+import { useAttendanceStore, useUserStore } from '../../store';
+import { localDateKey } from '../../store/localDate';
 import { AppTabParamList } from '../../navigation/AppTabs';
 import { Calendar } from 'react-native-calendars';
 
 type Props = BottomTabScreenProps<AppTabParamList, 'History'>;
 
 export const HistoryScreen: React.FC<Props> = () => {
-  const allRecords = useAttendanceStore((state) => state.records);
+  const userId = useUserStore(state => state.user?.id);
+  const records = useAttendanceStore((state) => state.records);
+  const allRecords = useMemo(() => records.filter(record => record.userId === userId), [records, userId]);
   const detailedRecords = useMemo(() => allRecords.filter(r => !r.isPurged), [allRecords]);
 
   const markedDates = useMemo(() => {
@@ -25,7 +28,7 @@ export const HistoryScreen: React.FC<Props> = () => {
     for (let i = 0; i < 30; i++) {
       const d = new Date();
       d.setDate(today.getDate() - i);
-      const dateStr = d.toISOString().split('T')[0];
+      const dateStr = localDateKey(d);
       
       if (recordMap.has(dateStr)) {
         const record = recordMap.get(dateStr);
@@ -91,7 +94,7 @@ export const HistoryScreen: React.FC<Props> = () => {
         <View style={styles.detailsContainer}>
           <Text style={styles.detailsTitle}>Detailed Offline Logs</Text>
           {detailedRecords.length === 0 ? (
-            <Text style={styles.emptyText}>No detailed logs found. All heavy data has been purged to AWS.</Text>
+            <Text style={styles.emptyText}>No local attendance records found.</Text>
           ) : (
             detailedRecords.map(record => (
               <View key={record.id} style={styles.recordCard}>

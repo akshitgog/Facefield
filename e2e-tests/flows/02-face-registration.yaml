@@ -1,0 +1,58 @@
+# 02-face-registration.yaml
+# Flow: Face Registration Screen & Biometric Enrollment Boundary
+# Source of truth: client/screens/auth/FaceRegistrationScreen.tsx
+appId: com.helloworld
+---
+# Verify on Face Registration screen
+- extendedWaitUntil:
+    visible: "Register Your Face"
+    timeout: 8000
+
+# Handle camera permission dialog if shown
+- runFlow:
+    when:
+      visible: "Grant Permission|While using the app|Only this time"
+    commands:
+      - tapOn:
+          text: ".*While using the app.*|.*Grant Permission.*"
+
+# Wait for camera initialization and Capture button
+- extendedWaitUntil:
+    visible: "Capture & Register"
+    timeout: 10000
+
+# [AUTOMATED STEP]: Tap Capture & Register to engage camera & ML frame processor
+- extendedWaitUntil:
+    visible:
+      id: "camera-analysis-ready"
+    timeout: 15000
+- assertNotVisible:
+    id: "camera-error"
+- tapOn: "Capture & Register"
+
+# [HUMAN BIOMETRIC BOUNDARY]:
+# MediaPipe FaceLandmarker + FaceNet actively scans for a real human face.
+# If a human is present, it computes 5 averaged embeddings and sets phase='success'.
+# Timeout is generous (25s) to allow human alignment, or proceed if already complete.
+- extendedWaitUntil:
+    visible: "Face Registered|Go to Dashboard|Account created successfully"
+    timeout: 25000
+
+# Tap Continue to Login or Go to Dashboard on success screen
+- runFlow:
+    when:
+      visible: "Continue to Login|Go to Dashboard"
+    commands:
+      - tapOn: "Continue to Login|Go to Dashboard"
+
+# Handle optional legacy completion Alert if shown
+- runFlow:
+    when:
+      visible: "OK"
+    commands:
+      - tapOn: "OK"
+
+# Verify returned to LoginScreen
+- extendedWaitUntil:
+    visible: "Facefield|Login"
+    timeout: 10000

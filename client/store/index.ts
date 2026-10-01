@@ -1,6 +1,10 @@
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { secureStorage, hashSecret } from './secureStorage';
+import { getAllAttendance } from './embeddingStorage';
+import type { AttendanceRecord } from './embeddingStorage';
+import { localDateKey } from './localDate';
+export type { AttendanceRecord } from './embeddingStorage';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 export interface User {
@@ -13,19 +17,10 @@ export interface User {
   age: number;
   idCard: string;
   disability?: string;
-  favTeacher: string;
-  password?: string;
+  recoveryAnswerHash: string;
+  passwordHash: string;
   faceRegistered: boolean;
   faceImageUri?: string;
-}
-
-export interface AttendanceRecord {
-  id: string;
-  date: string;        // 'YYYY-MM-DD'
-  entryTime?: string;  // 'HH:MM'
-  status: 'present' | 'absent' | 'late';
-  synced: boolean;
-  isPurged?: boolean;
 }
 
 // ── User Store ───────────────────────────────────────────────────────────────
@@ -40,12 +35,12 @@ interface UserState {
   setToken: (t: string) => void;
   logout: () => void;
   setFaceRegistered: (uri?: string) => void;
-  updatePassword: (email: string, password: string) => void;
+  updatePassword: (email: string, password: string) => Promise<void>;
 }
 
 export const useUserStore = create<UserState>()(
   persist(
-    (set) => ({
+    (set, get) => ({
       user: null,
       registeredUsers: {},
       isLoggedIn: false,
@@ -66,21 +61,26 @@ export const useUserStore = create<UserState>()(
         set((s) => ({
           user: s.user ? { ...s.user, faceRegistered: true, faceImageUri: uri } : null,
         })),
-      updatePassword: (email: string, password: string) =>
-        set((s) => {
-          const key = email.trim().toLowerCase();
-          const targetUser = s.registeredUsers[key];
-          if (!targetUser) return {};
-          const updated = { ...targetUser, password };
-          return {
-            registeredUsers: { ...s.registeredUsers, [key]: updated },
-            ...(s.user?.email.trim().toLowerCase() === key ? { user: updated } : {})
-          };
-        }),
+      updatePassword: async (email: string, password: string) => {
+        const passwordHash = await hashSecret(password);
+        const current = get();
+        const key = email.trim().toLowerCase();
+        const targetUser = current.registeredUsers[key];
+        if (!targetUser) throw new Error('Account is unavailable');
+        const updated = { ...targetUser, passwordHash };
+        const changes = {
+          registeredUsers: { ...current.registeredUsers, [key]: updated },
+          ...(current.user?.email.trim().toLowerCase() === key ? { user: updated } : {}),
+        };
+        // Commit credentials before exposing them to login in memory.
+        await secureStorage.setItem('user-storage', JSON.stringify({ state: { ...current, ...changes }, version: 0 }));
+        set(changes);
+      },
     }),
     {
       name: 'user-storage',
-      storage: createJSONStorage(() => AsyncStorage),
+      storage: createJSONStorage(() => secureStorage),
+      skipHydration: true,
     }
   )
 );
@@ -92,58 +92,39 @@ interface AttendanceState {
   addRecord: (r: AttendanceRecord) => void;
   setTodayRecord: (r: AttendanceRecord | null) => void;
   getHistory: () => AttendanceRecord[];
+  loadRecords: () => Promise<void>;
   syncAndPurgeDemo: () => Promise<number>;
 }
 
-const today = () => new Date().toISOString().split('T')[0];
+const today = localDateKey;
 
 export const useAttendanceStore = create<AttendanceState>()(
-  persist(
     (set, get) => ({
       records: [],
       todayRecord: null,
 
       addRecord: (r) =>
         set((s) => ({
-          records: [r, ...s.records],
-          todayRecord: r.date === today() ? r : s.todayRecord,
+          records: [r, ...s.records.filter((old) => old.id !== r.id)],
+          todayRecord: r.date === today() && r.userId === useUserStore.getState().user?.id ? r : s.todayRecord,
         })),
 
       setTodayRecord: (r) => set({ todayRecord: r }),
 
+      loadRecords: async () => {
+        const records = await getAllAttendance();
+        set({ records, todayRecord: records.find((r) => r.date === today() && r.userId === useUserStore.getState().user?.id) ?? null });
+      },
+
       getHistory: () => {
         const s = get();
-        return [...s.records].sort(
+        return s.records.filter((r) => r.userId === useUserStore.getState().user?.id).sort(
           (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()
         );
       },
 
       syncAndPurgeDemo: async () => {
-        const s = get();
-        const recordsToSync = s.records.filter(r => !r.synced);
-        if (recordsToSync.length === 0) return 0;
-
-        // 1. Simulate AWS Network Request
-        await new Promise(resolve => setTimeout(resolve, 1500));
-
-        // 2. Mark as Synced & Purge (Local device cleanup)
-        set((state) => {
-          // Keep the records for the Calendar UI, but mark them as purged.
-          // This simulates deleting the heavy logs but keeping the date summary.
-          const updatedRecords = state.records.map(r => 
-            !r.synced ? { ...r, synced: true, isPurged: true } : r
-          );
-          return {
-            records: updatedRecords
-          };
-        });
-
-        return recordsToSync.length;
+        throw new Error('AWS sync is not configured. Local records have not been purged.');
       },
-    }),
-    {
-      name: 'attendance-storage',
-      storage: createJSONStorage(() => AsyncStorage),
-    }
-  )
+    })
 );

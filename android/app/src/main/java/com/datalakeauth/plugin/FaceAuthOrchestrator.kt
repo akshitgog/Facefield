@@ -32,7 +32,7 @@ class FaceAuthOrchestrator(context: Context) {
     private val silentFaceEngine = SilentFaceEngine(context)
     private val screenSpoofDetector = ScreenSpoofDetector()
     private val faceNetEngine = FaceNetEngine(context)
-    private val registrationEngine = RegistrationEngine(context)
+    private val registrationEngine = RegistrationEngine(context, faceNetEngine, ownsFaceNetEngine = false)
 
     // State for session-based spoofing (fused screen replay + SilentFace score window)
     private val recentSilentSpoofScores = mutableListOf<Float>()
@@ -65,6 +65,7 @@ class FaceAuthOrchestrator(context: Context) {
     }
 
     private var debugFrameCount = 0
+    private var lastFrameTime = 0L
 
     /**
      * Runs the full attendance verification pipeline with parallel liveness.
@@ -82,10 +83,17 @@ class FaceAuthOrchestrator(context: Context) {
         faceBox: FaceBox,
         faceMeshLandmarks: List<LandmarkPoint>,
         storedEmbeddings: Map<String, FloatArray>,
-        similarityThreshold: Float = 0.85f,
+        similarityThreshold: Float = 0.70f,
         qualityPassed: Boolean = true,
         qualityReason: String? = null
     ): Map<String, Any?> {
+        val now = System.currentTimeMillis()
+        if (now - lastFrameTime > 2000) {
+            android.util.Log.d("FaceAuth", "SESSION_RESET: Wiping stale memory due to timeout.")
+            resetSession()
+        }
+        lastFrameTime = now
+
         debugFrameCount++
         android.util.Log.d("FaceAuth", "FRAME_COUNT_DEBUG processing frame $debugFrameCount")
 
@@ -196,12 +204,13 @@ class FaceAuthOrchestrator(context: Context) {
             if (avgFusedSpoof >= AVG_FUSED_SPOOF_THRESHOLD ||
                 (avgSilentSpoof > AVG_SILENT_SPOOF_THRESHOLD && avgScreenScore > AVG_SCREEN_SCORE_THRESHOLD)
             ) {
+                val finalLiveScore = lastLiveScore
                 resetSession()
                 return buildResult(
                     status = "REJECT",
                     reason = "Spoof detected. This may be a screen replay.",
                     isLive = false,
-                    liveScore = lastLiveScore,
+                    liveScore = finalLiveScore,
                     spoofScore = avgFusedSpoof,
                     qualityPassed = true,
                     liveness = liveness,
@@ -239,24 +248,28 @@ class FaceAuthOrchestrator(context: Context) {
         val embedding = faceNetEngine.extractEmbedding(bitmap, faceBox)
         val matchResult = faceNetEngine.match(embedding, storedEmbeddings, similarityThreshold)
 
-        android.util.Log.d("FaceAuth", "RECOGNITION_DEBUG matched=${matchResult.matched} score=${matchResult.recognitionScore} userId=${matchResult.matchedUserId}")
+        android.util.Log.d("FaceAuth", "RECOGNITION_DEBUG matched=${matchResult.matched} score=${matchResult.recognitionScore}")
 
         if (!matchResult.matched) {
             consecutiveRecognitionFailures++
             if (consecutiveRecognitionFailures >= 5) {
+                val finalLiveScore = lastLiveScore
+                val finalSpoofScore = lastSpoofScore
+                val finalScreenScore = lastScreenScore
+                val finalFusedSpoofScore = lastFusedSpoofScore
                 resetSession()
                 return buildResult(
                     status = "REJECT",
                     reason = "Face not recognized. No matching user found.",
                     isLive = true,
-                    liveScore = lastLiveScore,
-                    spoofScore = lastSpoofScore,
+                    liveScore = finalLiveScore,
+                    spoofScore = finalSpoofScore,
                     qualityPassed = true,
                     liveness = liveness,
                     matchedUserId = null,
                     recognitionScore = matchResult.recognitionScore,
-                    screenScore = lastScreenScore,
-                    fusedSpoofScore = lastFusedSpoofScore
+                    screenScore = finalScreenScore,
+                    fusedSpoofScore = finalFusedSpoofScore
                 )
             } else {
                 return buildResult(
@@ -278,8 +291,7 @@ class FaceAuthOrchestrator(context: Context) {
         // ============================================================
         // STEP 4: SUCCESS — All checks passed
         // ============================================================
-        resetSession() // CRITICAL FIX: Reset state for the NEXT scan
-        return buildResult(
+        val result = buildResult(
             status = "ACCEPT",
             reason = "Attendance verified successfully.",
             isLive = true,
@@ -292,6 +304,8 @@ class FaceAuthOrchestrator(context: Context) {
             screenScore = lastScreenScore,
             fusedSpoofScore = lastFusedSpoofScore
         )
+        resetSession()
+        return result
     }
 
     /**
@@ -300,6 +314,10 @@ class FaceAuthOrchestrator(context: Context) {
      */
     fun extractRegistrationEmbedding(bitmap: Bitmap, faceBox: FaceBox): FloatArray {
         return registrationEngine.generateRobustEmbedding(bitmap, faceBox)
+    }
+
+    fun verifyRegistrationLiveness(bitmap: Bitmap, faceBox: FaceBox): SilentFaceEngine.LivenessResult {
+        return silentFaceEngine.verify(bitmap, faceBox)
     }
 
     fun close() {
