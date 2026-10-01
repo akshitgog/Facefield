@@ -1,10 +1,10 @@
 import React, { useEffect, useState } from 'react';
 import { ActivityIndicator, Button, Text, View } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
-import { RootNavigator } from './client/navigation/RootNavigator';
-import { useUserStore, useAttendanceStore } from './client/store';
-import { secureStorage, flushSecureStorage } from './client/store/secureStorage';
-import { getAllEmbeddings, migrateAttendance, reconcileEnrollments } from './client/store/embeddingStorage';
+import { RootNavigator } from './frontend/navigation/RootNavigator';
+import { useUserStore, useAttendanceStore } from './frontend/store';
+import { secureStorage, flushSecureStorage } from './frontend/store/secureStorage';
+import { getAllEmbeddings, migrateAttendance, reconcileEnrollments } from './frontend/store/embeddingStorage';
 
 export default function App() {
   const [ready, setReady] = useState(false);

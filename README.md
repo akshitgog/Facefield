@@ -1,6 +1,5 @@
 # Datalake 3.0 - Offline Facial Recognition & Liveness Detection
 
-*Co-developed by [@KurianJose7586](https://github.com/KurianJose7586)*
 This project was developed for the Hackathon to provide a highly accurate, lightweight, and entirely offline facial recognition attendance system for remote locations.
 
 > [!WARNING]
@@ -40,7 +39,7 @@ npx react-native run-android
 *(Note: The AI Models are bundled directly into the `android/app/src/main/assets/` directory.)*
 
 ## 📁 Repository Structure
-- `/client` - React Native UI, Navigation, and Zustand State.
+- `/frontend` - React Native UI, Navigation, and Zustand State.
 - `/android/app/src/main/java/com/datalakeauth` - Custom Kotlin/C++ Native modules for ML pipelines, Liveness, and Registration.
 - `/android/app/src/main/assets` - TFLite Models.
 - `AWS_INTEGRATION.md` - Documentation outlining the Sync & Purge mechanism.

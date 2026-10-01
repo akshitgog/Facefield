@@ -16,7 +16,6 @@
   "exclude": [
     "node_modules",
     "babel.config.js",
-    "metro.config.js",
-    "Source_Code"
+    "metro.config.js"
   ]
 }

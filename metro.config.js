@@ -7,8 +7,6 @@ const exclusionList = require('metro-config/src/defaults/exclusionList');
  *
  * @type {import('metro-config').MetroConfig}
  */
-const config = {
-  resolver: {blockList: exclusionList([/[/\\]Source_Code[/\\].*/])},
-};
+const config = {};
 
 module.exports = mergeConfig(getDefaultConfig(__dirname), config);
