@@ -1,4 +1,4 @@
-# FaceField 👤⚡
+# FaceField 
 
 > **High-Performance, Offline-First Facial Recognition & Dual-Layer Liveness Attendance System**  
 > *Engineered for zero-connectivity edge deployments, fraud prevention, and autonomous cloud synchronization.*
