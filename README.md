@@ -1,45 +1,39 @@
-# Datalake 3.0 - Offline Facial Recognition & Liveness Detection
+# FaceField
 
-This project was developed for the Hackathon to provide a highly accurate, lightweight, and entirely offline facial recognition attendance system for remote locations.
+Offline-first facial recognition and liveness detection attendance system designed for reliable workforce management without active internet connectivity.
 
-> [!WARNING]
-> **Judges Testing Disclaimer (MVP Notice):**
-> 1. To install, download `app-release.apk` from the **GitHub Releases** section (on the right side of this page) and install it via your Android **File Manager**.
-> 2. Close the app, then go back to the File Manager and install it **one more time** (click "Update").
-> 3. Open the app and fill in your signup details.
-> 4. When clicking to scan your face, the app may close/crash once. This is just a one-time MVP memory allocation error!
-> 5. **Simply reopen the app and signup again.** From that point forward, the entire pipeline is buttery smooth and extremely stable!
+---
 
-## 🚀 Key Achievements
-- **Offline First**: Works with zero network connectivity. Uses local SQLite and AsyncStorage.
-- **Micro AI Footprint**: Achieved an AI model footprint of just **6.04 MB** using Dynamic Range Quantization (DRQ), successfully beating the 20 MB requirement.
-- **Zero-Latency Native Processing**: Bypassed the React Native bridge by implementing computer vision processing purely in C++ JSI and Kotlin `react-native-worklets-core`.
-- **Dual-Layer Liveness Detection**:
-  - **Passive Liveness**: 2 Neural Networks analyzing moiré patterns/textures to detect printed photos and digital screens.
-  - **Active Liveness**: Real-time 3D tracking of 468 facial landmarks to detect blinks, smiles, and head turns.
+## 📱 Quick Start & Installation
 
-## 📦 System Architecture
-1. **Frontend**: React Native, Zustand (State Management), React Navigation.
-2. **Camera API**: `react-native-vision-camera` (v4).
-3. **Native ML**: TensorFlow Lite C++ API, MediaPipe Tasks Vision.
-4. **Offline Database**: Android SQLite OpenHelper.
+To install and test the application on an Android device:
 
-## 🔧 Setup Instructions
+1. Download the pre-built **`app-release.apk`** from the [GitHub Releases](https://github.com/akshitgog/Facefield/releases) section.
+2. Open your device's **File Manager** and tap `app-release.apk` to install.
+3. Open the app and proceed through the registration/login flow.
+4. Complete your one-time face registration in good lighting, then test attendance marking.
+
+---
+
+## 💻 Local Setup & Development
 
 ### 1. Install Dependencies
 ```bash
 npm install
 ```
 
-### 2. Run Android Application
+### 2. Run on Android
 ```bash
 npx react-native run-android
 ```
 
-*(Note: The AI Models are bundled directly into the `android/app/src/main/assets/` directory.)*
+---
 
-## 📁 Repository Structure
-- `/frontend` - React Native UI, Navigation, and Zustand State.
-- `/android/app/src/main/java/com/datalakeauth` - Custom Kotlin/C++ Native modules for ML pipelines, Liveness, and Registration.
-- `/android/app/src/main/assets` - TFLite Models.
-- `AWS_INTEGRATION.md` - Documentation outlining the Sync & Purge mechanism.
+## 📁 Repository Structure & Documentation
+
+Detailed technical documentation is modularized within each subfolder:
+
+- **[`/frontend`](file:///C:/Users/Galactus/OneDrive/Desktop/FaceField/frontend/README.md)**: React Native screens, Zustand state management, navigation stacks, and UI components.
+- **[`/android`](file:///C:/Users/Galactus/OneDrive/Desktop/FaceField/android/README.md)**: Native CameraX pipeline, MediaPipe & TensorFlow Lite model integration, active/passive liveness detection, and native build scripts.
+- **[`docs/aws_integration.md`](file:///C:/Users/Galactus/OneDrive/Desktop/FaceField/docs/aws_integration.md)**: Specifications for AWS synchronization and data purging mechanisms.
+- **[`scripts/RELEASE.md`](file:///C:/Users/Galactus/OneDrive/Desktop/FaceField/scripts/RELEASE.md)**: Guide for configuring keystores and generating release builds.

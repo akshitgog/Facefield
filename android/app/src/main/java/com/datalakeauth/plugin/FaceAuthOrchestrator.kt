@@ -74,7 +74,7 @@ class FaceAuthOrchestrator(context: Context) {
      * @param faceBox             The detected face bounding box
      * @param faceMeshLandmarks   The 468 MediaPipe FaceMesh landmarks (pixel coords)
      * @param storedEmbeddings    The user's stored embeddings from SQLite
-     * @param similarityThreshold Cosine similarity threshold for match (default 0.70)
+     * @param similarityThreshold Cosine similarity threshold for match (default 0.65)
      *
      * @return A Map<String, Any?> serialized to JSON for React Native
      */
@@ -83,7 +83,7 @@ class FaceAuthOrchestrator(context: Context) {
         faceBox: FaceBox,
         faceMeshLandmarks: List<LandmarkPoint>,
         storedEmbeddings: Map<String, FloatArray>,
-        similarityThreshold: Float = 0.70f,
+        similarityThreshold: Float = 0.65f,
         qualityPassed: Boolean = true,
         qualityReason: String? = null
     ): Map<String, Any?> {
