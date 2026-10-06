@@ -1,15 +1,22 @@
-# FaceField 
+<p align="center">
+  <img src="frontend/assets/logo.png" alt="FaceField Logo" width="130" />
+</p>
 
-> **High-Performance, Offline-First Facial Recognition & Dual-Layer Liveness Attendance System**  
-> *Engineered for zero-connectivity edge deployments, fraud prevention, and autonomous cloud synchronization.*
+<h1 align="center">FaceField</h1>
 
-[![Platform](https://img.shields.io/badge/Platform-Android%20(API%2024+)--green.svg?logo=android&logoColor=white)](https://developer.android.com)
-[![React Native](https://img.shields.io/badge/React%20Native-0.73.0-61DAFB.svg?logo=react&logoColor=black)](https://reactnative.dev)
-[![Kotlin](https://img.shields.io/badge/Native%20Core-Kotlin%202.0.21-7F52FF.svg?logo=kotlin&logoColor=white)](https://kotlinlang.org)
-[![LiteRT / TFLite](https://img.shields.io/badge/Inference-LiteRT%20%2F%20TFLite%20DRQ-FF6F00.svg?logo=tensorflow&logoColor=white)](https://tensorflow.org/lite)
-[![MediaPipe](https://img.shields.io/badge/Face%20Mesh-MediaPipe%20468%20Points-0078D4.svg?logo=google&logoColor=white)](https://developers.google.com/mediapipe)
-[![AWS Serverless](https://img.shields.io/badge/Cloud%20Sync-AWS%20Lambda%20%2B%20DynamoDB-FF9900.svg?logo=amazon-aws&logoColor=white)](docs/aws_integration.md)
-[![License](https://img.shields.io/badge/License-Proprietary-red.svg)]()
+<p align="center">
+  <strong>High-Performance, Offline-First Facial Recognition & Dual-Layer Liveness Attendance System</strong><br/>
+  <em>Engineered for zero-connectivity edge deployments, fraud prevention, and autonomous cloud synchronization.</em>
+</p>
+
+<p align="center">
+  <a href="https://developer.android.com"><img src="https://img.shields.io/badge/Platform-Android%20(API%2024+)--green.svg?logo=android&logoColor=white" alt="Platform" /></a>
+  <a href="https://reactnative.dev"><img src="https://img.shields.io/badge/React%20Native-0.73.0-61DAFB.svg?logo=react&logoColor=black" alt="React Native" /></a>
+  <a href="https://kotlinlang.org"><img src="https://img.shields.io/badge/Native%20Core-Kotlin%202.0.21-7F52FF.svg?logo=kotlin&logoColor=white" alt="Kotlin" /></a>
+  <a href="https://tensorflow.org/lite"><img src="https://img.shields.io/badge/Inference-LiteRT%20%2F%20TFLite%20DRQ-FF6F00.svg?logo=tensorflow&logoColor=white" alt="TFLite" /></a>
+  <a href="https://developers.google.com/mediapipe"><img src="https://img.shields.io/badge/Face%20Mesh-MediaPipe%20468%20Points-0078D4.svg?logo=google&logoColor=white" alt="MediaPipe" /></a>
+  <a href="docs/aws_integration.md"><img src="https://img.shields.io/badge/Cloud%20Sync-AWS%20Lambda%20%2B%20DynamoDB-FF9900.svg?logo=amazon-aws&logoColor=white" alt="AWS" /></a>
+</p>
 
 ---
 
